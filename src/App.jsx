@@ -91,6 +91,19 @@ function App() {
     fetchProducts();
   }, [fetchProducts]);
 
+  // Smooth scroll focus to products section when active search query is entered
+  useEffect(() => {
+    if (searchTerm.trim().length > 0) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById("products");
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth" });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm]);
+
   // Cart operations with PHP API
   const handleAddToCart = async (item, quantity = 1) => {
     try {

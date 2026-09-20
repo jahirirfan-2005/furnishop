@@ -227,8 +227,15 @@ export const api = {
         products = products.filter(p => p.collection_title.toLowerCase().includes(params.collection.toLowerCase()) || p.collection_id == params.collection);
       }
       if (params.search) {
-        const q = params.search.toLowerCase();
-        products = products.filter(p => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q));
+        const q = params.search.trim().replace(/\s+/g, ' ').toLowerCase();
+        if (q) {
+          products = products.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            p.description.toLowerCase().includes(q) ||
+            (p.material && p.material.toLowerCase().includes(q)) ||
+            (p.category_name && p.category_name.toLowerCase().includes(q))
+          );
+        }
       }
       if (params.featured === "1") {
         products = products.filter(p => p.is_featured);

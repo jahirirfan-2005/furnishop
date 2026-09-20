@@ -90,7 +90,9 @@ function ProductList({
       {/* Search Feedback Summary */}
       {searchTerm && (
         <div className="search-summary-bar">
-          <span>Search results for <strong>"{searchTerm}"</strong> ({products.length} items found)</span>
+          <span>
+            Search results for <strong>"{searchTerm}"</strong> ({products.length} {products.length === 1 ? "product" : "products"} found)
+          </span>
           <button onClick={() => setSearchTerm("")}>Clear Search</button>
         </div>
       )}
@@ -122,8 +124,8 @@ function ProductList({
       ) : (
         <div className="no-results">
           <FaBoxOpen className="empty-icon" />
-          <h3>No products found</h3>
-          <p>Try searching for a different keyword or select another category collection.</p>
+          <h3>No products found for '{searchTerm}'.</h3>
+          <p>Try searching for a different keyword or clear your search to view all items.</p>
           <button
             className="btn-primary"
             onClick={() => {
@@ -132,7 +134,7 @@ function ProductList({
               setSearchTerm("");
             }}
           >
-            Reset All Filters
+            Clear Search & Display All Products
           </button>
         </div>
       )}

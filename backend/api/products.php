@@ -8,7 +8,10 @@ if ($method === 'GET') {
         $id = isset($_GET['id']) ? intval($_GET['id']) : null;
         $category = isset($_GET['category']) ? $_GET['category'] : null;
         $collection = isset($_GET['collection']) ? $_GET['collection'] : null;
-        $search = isset($_GET['search']) ? trim($_GET['search']) : null;
+        $search = isset($_GET['search']) ? preg_replace('/\s+/', ' ', trim($_GET['search'])) : null;
+        if ($search === '') {
+            $search = null;
+        }
         $sort = isset($_GET['sort']) ? $_GET['sort'] : 'featured';
         $minPrice = isset($_GET['min_price']) ? floatval($_GET['min_price']) : null;
         $maxPrice = isset($_GET['max_price']) ? floatval($_GET['max_price']) : null;
