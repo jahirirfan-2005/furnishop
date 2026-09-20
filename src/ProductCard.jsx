@@ -159,7 +159,7 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
           </button>
           <div className="card-back-image-wrapper" onClick={() => setFlipped(false)}>
             <img
-              src={item.backImage || item.image}
+              src={item.back_image || item.backImage || item.image}
               alt={`${item.name} Detail`}
               loading="lazy"
               onError={(e) => {

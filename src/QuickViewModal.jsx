@@ -42,16 +42,18 @@ function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isW
                   e.target.src = FALLBACK_IMG;
                 }}
               />
-              <img
-                src={product.backImage || product.image}
-                alt="Detail view"
-                className={activeImg === product.backImage ? "active" : ""}
-                onClick={() => setSelectedImage(product.backImage)}
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = FALLBACK_IMG;
-                }}
-              />
+              {Boolean(product.back_image || product.backImage) && (
+                <img
+                  src={product.back_image || product.backImage}
+                  alt="Detail view"
+                  className={activeImg === (product.back_image || product.backImage) ? "active" : ""}
+                  onClick={() => setSelectedImage(product.back_image || product.backImage)}
+                  onError={(e) => {
+                    e.target.onerror = null;
+                    e.target.src = FALLBACK_IMG;
+                  }}
+                />
+              )}
             </div>
           </div>
 
