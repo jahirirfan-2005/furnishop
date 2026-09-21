@@ -1,15 +1,28 @@
 import React, { useState } from "react";
-import { FaTimes, FaStar, FaShoppingCart, FaHeart, FaCheck, FaTruck, FaShieldAlt } from "react-icons/fa";
+import { FaTimes, FaStar, FaShoppingCart, FaHeart, FaCheck, FaTruck, FaShieldAlt, FaBolt, FaBoxOpen } from "react-icons/fa";
+import { resolveImageUrl } from "./api";
 
 const FALLBACK_IMG = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
 
-function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isWishlisted }) {
+function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isWishlisted, onBuyNow }) {
+  // State is initialized from props; App.jsx remounts this modal with a `key`
+  // per product so a stale quantity/image never carries over.
   const [quantity, setQuantity] = useState(1);
-  const [selectedImage, setSelectedImage] = useState(product?.image);
+  const [selectedImage, setSelectedImage] = useState(() => resolveImageUrl(product?.image));
 
   if (!product) return null;
 
-  const activeImg = selectedImage || product.image;
+  const gallery = [
+    { src: resolveImageUrl(product.image), alt: "Front view" },
+    ...(product.back_image ? [{ src: resolveImageUrl(product.back_image), alt: "Detail view" }] : []),
+    ...((product.additional_images_arr || []).map((img, i) => ({ src: resolveImageUrl(img), alt: `View ${i + 3}` })))
+  ].filter((g, i, arr) => g.src && arr.findIndex((x) => x.src === g.src) === i);
+
+  const activeImg = selectedImage || resolveImageUrl(product.image);
+  const outOfStock = product.stock_status === "Out of Stock" || product.stock_quantity === 0;
+  const discountPrice = product.discount_price && product.discount_price < product.price ? product.discount_price : null;
+  const effectivePrice = discountPrice ?? product.price;
+  const originalPrice = product.original_price && product.original_price > effectivePrice ? product.original_price : null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -30,30 +43,22 @@ function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isW
                   e.target.src = FALLBACK_IMG;
                 }}
               />
+              {discountPrice && <span className="discount-tag">-{Math.round(((product.price - discountPrice) / product.price) * 100)}%</span>}
             </div>
             <div className="thumbnail-row">
-              <img
-                src={product.image}
-                alt="Front view"
-                className={activeImg === product.image ? "active" : ""}
-                onClick={() => setSelectedImage(product.image)}
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = FALLBACK_IMG;
-                }}
-              />
-              {Boolean(product.back_image || product.backImage) && (
+              {gallery.map((g, i) => (
                 <img
-                  src={product.back_image || product.backImage}
-                  alt="Detail view"
-                  className={activeImg === (product.back_image || product.backImage) ? "active" : ""}
-                  onClick={() => setSelectedImage(product.back_image || product.backImage)}
+                  key={i}
+                  src={g.src}
+                  alt={g.alt}
+                  className={activeImg === g.src ? "active" : ""}
+                  onClick={() => setSelectedImage(g.src)}
                   onError={(e) => {
                     e.target.onerror = null;
                     e.target.src = FALLBACK_IMG;
                   }}
                 />
-              )}
+              ))}
             </div>
           </div>
 
@@ -72,13 +77,13 @@ function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isW
             </div>
 
             <div className="price-row">
-              <span className="current-price">₹{Number(product.price).toLocaleString()}</span>
-              {product.original_price && (
-                <span className="original-price">₹{Number(product.original_price).toLocaleString()}</span>
+              <span className="current-price">₹{Number(effectivePrice).toLocaleString()}</span>
+              {originalPrice && (
+                <span className="original-price">₹{Number(originalPrice).toLocaleString()}</span>
               )}
-              {product.original_price && (
+              {originalPrice && (
                 <span className="savings-badge">
-                  Save ₹{Number(product.original_price - product.price).toLocaleString()}
+                  Save ₹{Number(originalPrice - effectivePrice).toLocaleString()}
                 </span>
               )}
             </div>
@@ -88,32 +93,41 @@ function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isW
             {/* Spec Highlights */}
             <div className="specs-list">
               <div className="spec-item">
-                <strong>Dimensions:</strong> {product.dimensions}
+                <strong>Dimensions:</strong> {product.dimensions || "—"}
               </div>
               <div className="spec-item">
-                <strong>Material:</strong> {product.material}
+                <strong>Material:</strong> {product.material || "—"}
               </div>
               <div className="spec-item">
-                <strong>Availability:</strong> <span className="in-stock"><FaCheck /> {product.stock_status}</span>
+                <strong>Color:</strong> {product.color || "—"}
+              </div>
+              <div className="spec-item">
+                <strong>Availability:</strong>{" "}
+                {outOfStock ? (
+                  <span className="out-of-stock"><FaTimes /> Out of Stock</span>
+                ) : (
+                  <span className="in-stock"><FaCheck /> {product.stock_status || "In Stock"}{product.stock_quantity ? ` (${product.stock_quantity} units)` : ""}</span>
+                )}
               </div>
             </div>
 
-            {/* Quantity Selector & Add to Cart */}
+            {/* Quantity Selector & Actions */}
             <div className="action-row">
               <div className="quantity-selector">
                 <button onClick={() => setQuantity(Math.max(1, quantity - 1))}>-</button>
                 <span>{quantity}</span>
-                <button onClick={() => setQuantity(quantity + 1)}>+</button>
+                <button onClick={() => setQuantity(Math.min(99, quantity + 1))}>+</button>
               </div>
 
               <button
                 className="btn-primary add-cart-btn"
+                disabled={outOfStock}
                 onClick={() => {
                   handleAddToCart(product, quantity);
                   onClose();
                 }}
               >
-                <FaShoppingCart /> Add to Cart
+                <FaShoppingCart /> {outOfStock ? "Out of Stock" : "Add to Cart"}
               </button>
 
               <button
@@ -125,10 +139,24 @@ function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isW
               </button>
             </div>
 
+            {/* Buy Now - add to cart and jump straight to checkout */}
+            <button
+              className="btn-secondary buy-now-btn"
+              disabled={outOfStock}
+              onClick={() => {
+                handleAddToCart(product, quantity);
+                onClose();
+                if (onBuyNow) onBuyNow(product);
+              }}
+            >
+              <FaBolt /> {outOfStock ? "Currently Unavailable" : "Buy Now"}
+            </button>
+
             {/* Additional Perks */}
             <div className="modal-perks">
               <div><FaTruck /> Express Delivery in 3-5 days</div>
               <div><FaShieldAlt /> 2-Year Manufacturer Warranty</div>
+              <div><FaBoxOpen /> Easy 30-Day Returns</div>
             </div>
           </div>
         </div>

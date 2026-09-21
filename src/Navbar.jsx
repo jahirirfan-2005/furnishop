@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge, FaPlus } from "react-icons/fa";
+import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge, FaPlus, FaUserShield } from "react-icons/fa";
 
 function Navbar({ 
   cartCount, 
@@ -7,6 +7,7 @@ function Navbar({
   onOpenCart, 
   onOpenWishlist, 
   onOpenAddProduct,
+  onOpenAdminPanel,
   searchTerm, 
   setSearchTerm,
   activeCategory,
@@ -102,6 +103,12 @@ function Navbar({
           <button className="add-product-nav-btn" onClick={onOpenAddProduct} title="Store New Product">
             <FaPlus className="add-icon" />
             <span>Store Product</span>
+          </button>
+
+          {/* Admin Panel Button */}
+          <button className="admin-nav-btn" onClick={onOpenAdminPanel} title="Open Database Admin Panel">
+            <FaUserShield className="admin-icon" />
+            <span>Admin</span>
           </button>
 
           {/* Theme Toggle */}

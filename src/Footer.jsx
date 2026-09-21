@@ -20,7 +20,7 @@ function Footer({ categories, onSelectCategory }) {
       } else {
         toast.error(res.message);
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to subscribe");
     } finally {
       setSubmitting(false);

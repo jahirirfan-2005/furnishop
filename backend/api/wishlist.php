@@ -1,65 +1,66 @@
 <?php
 require_once __DIR__ . '/config.php';
 
-$method = $_SERVER['REQUEST_METHOD'];
-$sessionId = isset($_GET['session_id']) ? $_GET['session_id'] : 'guest_session';
+try {
+    // ---------- GET: wishlist contents ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $sid = $_GET['session_id'] ?? '';
+        if (!$sid) json_out(["status" => "error", "message" => "session_id required"], 400);
 
-switch ($method) {
-    case 'GET':
-        try {
-            $stmt = $pdo->prepare("SELECT w.id as wishlist_id, p.* 
-                                   FROM wishlist w 
-                                   JOIN products p ON w.product_id = p.id 
-                                   WHERE w.session_id = ?");
-            $stmt->execute([$sessionId]);
-            $items = $stmt->fetchAll();
+        $stmt = $pdo->prepare(
+            "SELECT p.*, c.name AS category_name, col.title AS collection_title
+             FROM `$db`.wishlist_items wi
+             JOIN `$db`.products p ON p.id = wi.product_id
+             LEFT JOIN `$db`.categories c ON c.id = p.category_id
+             LEFT JOIN `$db`.collections col ON col.id = p.collection_id
+             WHERE wi.session_id = :sid
+             ORDER BY wi.created_at ASC"
+        );
+        $stmt->execute([':sid' => $sid]);
+        $rows = array_map('cast_product', $stmt->fetchAll());
 
-            foreach ($items as &$item) {
-                $item['wishlist_id'] = (int)$item['wishlist_id'];
-                $item['id'] = (int)$item['id'];
-                $item['price'] = (float)$item['price'];
-            }
+        echo json_encode(["status" => "success", "count" => count($rows), "data" => $rows]);
+        exit();
+    }
 
-            echo json_encode(["status" => "success", "session_id" => $sessionId, "data" => $items]);
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+    // ---------- POST: toggle item in wishlist ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $d = request_data();
+        $sid = $d['session_id'] ?? '';
+        $pid = (int)($d['product_id'] ?? 0);
+        if (!$sid || !$pid) json_out(["status" => "error", "message" => "session_id and product_id required"], 400);
+
+        $chk = $pdo->prepare("SELECT id FROM `$db`.wishlist_items WHERE session_id = :sid AND product_id = :pid");
+        $chk->execute([':sid' => $sid, ':pid' => $pid]);
+        $existing = $chk->fetch();
+
+        if ($existing) {
+            $stmt = $pdo->prepare("DELETE FROM `$db`.wishlist_items WHERE id = :id");
+            $stmt->execute([':id' => $existing['id']]);
+            echo json_encode(["status" => "success", "action" => "removed", "message" => "Wishlist removed"]);
+        } else {
+            $stmt = $pdo->prepare("INSERT IGNORE INTO `$db`.wishlist_items (session_id, product_id) VALUES (:sid, :pid)");
+            $stmt->execute([':sid' => $sid, ':pid' => $pid]);
+            echo json_encode(["status" => "success", "action" => "added", "message" => "Wishlist added"]);
         }
-        break;
+        exit();
+    }
 
-    case 'POST':
-        $input = json_decode(file_get_contents('php://input'), true);
-        $productId = isset($input['product_id']) ? intval($input['product_id']) : null;
-        $sessId = isset($input['session_id']) ? $input['session_id'] : $sessionId;
+    // ---------- DELETE: remove item ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        $d = request_data();
+        $sid = $d['session_id'] ?? ($_GET['session_id'] ?? '');
+        $pid = (int)($d['product_id'] ?? ($_GET['product_id'] ?? 0));
+        if (!$sid || !$pid) json_out(["status" => "error", "message" => "session_id and product_id required"], 400);
 
-        if (!$productId) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "product_id is required"]);
-            exit();
-        }
+        $stmt = $pdo->prepare("DELETE FROM `$db`.wishlist_items WHERE session_id = :sid AND product_id = :pid");
+        $stmt->execute([':sid' => $sid, ':pid' => $pid]);
+        echo json_encode(["status" => "success", "message" => "Item removed from wishlist"]);
+        exit();
+    }
 
-        try {
-            $stmtCheck = $pdo->prepare("SELECT id FROM wishlist WHERE session_id = ? AND product_id = ?");
-            $stmtCheck->execute([$sessId, $productId]);
-            $exists = $stmtCheck->fetch();
+    json_out(["status" => "error", "message" => "Method not allowed"], 405);
 
-            if ($exists) {
-                $stmtDelete = $pdo->prepare("DELETE FROM wishlist WHERE id = ?");
-                $stmtDelete->execute([$exists['id']]);
-                echo json_encode(["status" => "success", "action" => "removed", "message" => "Removed from wishlist"]);
-            } else {
-                $stmtInsert = $pdo->prepare("INSERT INTO wishlist (session_id, product_id) VALUES (?, ?)");
-                $stmtInsert->execute([$sessId, $productId]);
-                echo json_encode(["status" => "success", "action" => "added", "message" => "Added to wishlist"]);
-            }
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-        }
-        break;
-
-    default:
-        http_response_code(405);
-        echo json_encode(["status" => "error", "message" => "Method not allowed"]);
-        break;
+} catch (PDOException $e) {
+    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
 }

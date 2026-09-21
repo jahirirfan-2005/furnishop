@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Backend secrets & runtime files
+.env
+*.log
+mysqld.log
+php-server*.log
+dbdata/
+backend/uploads/products/*
+!backend/uploads/products/.gitkeep

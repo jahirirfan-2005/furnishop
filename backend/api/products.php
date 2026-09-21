@@ -1,225 +1,405 @@
 <?php
+/**
+ * Product REST API - the single gateway between the frontend and MySQL.
+ *
+ * GET    /backend/api/products.php                          -> list (filters below)
+ * GET    ?id=5                                              -> single product by id
+ * GET    ?slug=nordic-minimalist-oak-armchair               -> single product by slug
+ * GET    ?category=living-room                              -> by category slug or id
+ * GET    ?collection=royal-velvet                           -> by collection slug or id
+ * GET    ?search=sofa                                       -> keyword search
+ * GET    ?featured=1 | ?trending=1 | ?offers=1              -> flag filters
+ * GET    ?min_price=5000&max_price=25000                    -> price range
+ * GET    ?sort=featured|price_low|price_high|rating|newest|offers
+ * GET    ?page=1&per_page=12                                -> pagination
+ * GET    ?include_inactive=1                                -> admin: include inactive
+ * POST   {product fields}                                   -> create (admin)
+ * PUT    {id, ...fields}                                    -> update (admin)
+ * DELETE ?id=5                                              -> delete (admin)
+ */
+
 require_once __DIR__ . '/config.php';
+/** @var PDO $pdo */
+
+ensure_product_schema($pdo);
 
 $method = $_SERVER['REQUEST_METHOD'];
 
-if ($method === 'GET') {
-    try {
-        $id = isset($_GET['id']) ? intval($_GET['id']) : null;
-        $category = isset($_GET['category']) ? $_GET['category'] : null;
-        $collection = isset($_GET['collection']) ? $_GET['collection'] : null;
-        $search = isset($_GET['search']) ? preg_replace('/\s+/', ' ', trim($_GET['search'])) : null;
-        if ($search === '') {
-            $search = null;
-        }
-        $sort = isset($_GET['sort']) ? $_GET['sort'] : 'featured';
-        $minPrice = isset($_GET['min_price']) ? floatval($_GET['min_price']) : null;
-        $maxPrice = isset($_GET['max_price']) ? floatval($_GET['max_price']) : null;
+try {
+    // =====================================================================
+    // GET - list / search / single product
+    // =====================================================================
+    if ($method === 'GET') {
+        $baseSelect = "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
+                              col.title AS collection_title, col.slug AS collection_slug
+                       FROM products p
+                       LEFT JOIN categories c ON c.id = p.category_id
+                       LEFT JOIN collections col ON col.id = p.collection_id";
 
-        // Single product detail lookup
-        if ($id) {
-            $stmt = $pdo->prepare("SELECT p.*, c.name as category_name, col.title as collection_title 
-                                   FROM products p 
-                                   LEFT JOIN categories c ON p.category_id = c.id 
-                                   LEFT JOIN collections col ON p.collection_id = col.id 
-                                   WHERE p.id = ?");
-            $stmt->execute([$id]);
-            $product = $stmt->fetch();
-
-            if ($product) {
-                echo json_encode(["status" => "success", "data" => $product]);
-            } else {
-                http_response_code(404);
-                echo json_encode(["status" => "error", "message" => "Product not found"]);
+        // ---------- Single product by id ----------
+        if (!empty($_GET['id'])) {
+            $stmt = $pdo->prepare("$baseSelect WHERE p.id = :id LIMIT 1");
+            $stmt->execute([':id' => (int)$_GET['id']]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                api_error('Product not found', 404);
             }
-            exit();
+            api_success(cast_product($row), 'Product fetched');
         }
 
-        // List products query
-        $sql = "SELECT p.*, c.name as category_name, c.slug as category_slug, col.title as collection_title, col.slug as collection_slug 
-                FROM products p 
-                LEFT JOIN categories c ON p.category_id = c.id 
-                LEFT JOIN collections col ON p.collection_id = col.id 
-                WHERE 1=1";
+        // ---------- Single product by slug ----------
+        if (!empty($_GET['slug'])) {
+            $stmt = $pdo->prepare("$baseSelect WHERE p.slug = :slug LIMIT 1");
+            $stmt->execute([':slug' => trim($_GET['slug'])]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                api_error('Product not found', 404);
+            }
+            api_success(cast_product($row), 'Product fetched');
+        }
+
+        // ---------- List with filters ----------
+        $where  = [];
         $params = [];
 
-        if ($category && $category !== 'all') {
-            if (is_numeric($category)) {
-                $sql .= " AND p.category_id = ?";
-                $params[] = intval($category);
+        // Storefront never sees inactive products unless explicitly asked (admin).
+        if (empty($_GET['include_inactive'])) {
+            $where[] = "p.status = 'active'";
+        } elseif (($_GET['include_inactive'] ?? '') === 'inactive') {
+            $where[] = "p.status = 'inactive'";
+        }
+
+        if (!empty($_GET['category']) && $_GET['category'] !== 'all') {
+            if (ctype_digit((string)$_GET['category'])) {
+                $where[] = "p.category_id = :category";
+                $params[':category'] = (int)$_GET['category'];
             } else {
-                $sql .= " AND c.slug = ?";
-                $params[] = $category;
+                $where[] = "(c.slug = :category OR c.name = :category2)";
+                $params[':category']  = $_GET['category'];
+                $params[':category2'] = $_GET['category'];
             }
         }
 
-        if ($collection && $collection !== 'all') {
-            if (is_numeric($collection)) {
-                $sql .= " AND p.collection_id = ?";
-                $params[] = intval($collection);
+        if (!empty($_GET['collection']) && $_GET['collection'] !== 'all') {
+            if (ctype_digit((string)$_GET['collection'])) {
+                $where[] = "p.collection_id = :collection";
+                $params[':collection'] = (int)$_GET['collection'];
             } else {
-                $sql .= " AND col.slug = ?";
-                $params[] = $collection;
+                $where[] = "col.slug = :collection";
+                $params[':collection'] = $_GET['collection'];
             }
         }
 
-        if ($search) {
-            $sql .= " AND (p.name LIKE ? OR p.description LIKE ? OR p.material LIKE ? OR c.name LIKE ?)";
-            $searchTerm = "%$search%";
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
+        // Keyword search across name, description, material, color and category name.
+        if (!empty($_GET['search'])) {
+            $search = trim($_GET['search']);
+            if ($search !== '') {
+                $where[] = "(p.name LIKE :search OR p.description LIKE :search2
+                             OR p.material LIKE :search3 OR p.color LIKE :search4
+                             OR c.name LIKE :search5 OR p.slug LIKE :search6)";
+                $q = '%' . $search . '%';
+                $params[':search']  = $q;
+                $params[':search2'] = $q;
+                $params[':search3'] = $q;
+                $params[':search4'] = $q;
+                $params[':search5'] = $q;
+                $params[':search6'] = $q;
+            }
         }
 
-        if ($minPrice !== null && $minPrice > 0) {
-            $sql .= " AND p.price >= ?";
-            $params[] = $minPrice;
+        if (!empty($_GET['featured']))     { $where[] = "p.is_featured = 1"; }
+        if (!empty($_GET['trending']))     { $where[] = "p.is_trending = 1"; }
+        if (!empty($_GET['offers']))       { $where[] = "p.has_offer = 1"; }
+        if (!empty($_GET['in_stock_only'])) { $where[] = "p.stock_quantity > 0 AND p.stock_status <> 'Out of Stock'"; }
+
+        if (isset($_GET['min_price']) && is_numeric($_GET['min_price'])) {
+            $where[] = "p.price >= :min_price";
+            $params[':min_price'] = (float)$_GET['min_price'];
+        }
+        if (isset($_GET['max_price']) && is_numeric($_GET['max_price'])) {
+            $where[] = "p.price <= :max_price";
+            $params[':max_price'] = (float)$_GET['max_price'];
         }
 
-        if ($maxPrice !== null && $maxPrice > 0) {
-            $sql .= " AND p.price <= ?";
-            $params[] = $maxPrice;
+        $sql = $baseSelect;
+        if ($where) {
+            $sql .= " WHERE " . implode(" AND ", $where);
         }
 
-        // Sorting
-        switch ($sort) {
-            case 'price_low':
-                $sql .= " ORDER BY p.price ASC";
-                break;
-            case 'price_high':
-                $sql .= " ORDER BY p.price DESC";
-                break;
-            case 'rating':
-                $sql .= " ORDER BY p.rating DESC";
-                break;
-            case 'newest':
-                $sql .= " ORDER BY p.created_at DESC";
-                break;
-            case 'offers':
-                $sql .= " ORDER BY p.has_offer DESC, p.id ASC";
-                break;
+        // Sorting (whitelisted - never from raw input).
+        switch ($_GET['sort'] ?? '') {
+            case 'price_low':  $sql .= " ORDER BY p.price ASC"; break;
+            case 'price_high': $sql .= " ORDER BY p.price DESC"; break;
+            case 'rating':     $sql .= " ORDER BY p.rating DESC, p.reviews_count DESC"; break;
+            case 'newest':     $sql .= " ORDER BY p.created_at DESC, p.id DESC"; break;
+            case 'offers':     $sql .= " ORDER BY p.has_offer DESC, p.price ASC"; break;
+            case 'name':       $sql .= " ORDER BY p.name ASC"; break;
             case 'featured':
-            default:
-                $sql .= " ORDER BY p.is_featured DESC, p.id ASC";
-                break;
+            default:           $sql .= " ORDER BY p.is_featured DESC, p.id ASC"; break;
+        }
+
+        // Pagination.
+        $page    = max(1, (int)($_GET['page'] ?? 1));
+        $perPage = (int)($_GET['per_page'] ?? 0);
+        if ($perPage > 0) {
+            $perPage = min(100, max(1, $perPage));
+            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM ($sql) AS counted");
+            $countStmt->execute($params);
+            $total = (int)$countStmt->fetchColumn();
+
+            $offset = ($page - 1) * $perPage;
+            $sql .= " LIMIT $perPage OFFSET $offset";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = array_map('cast_product', $stmt->fetchAll());
+
+            json_out([
+                'status'    => 'success',
+                'success'   => true,
+                'message'   => 'Products fetched',
+                'data'      => $rows,
+                'count'     => count($rows),
+                'total'     => $total,
+                'page'      => $page,
+                'per_page'  => $perPage,
+                'last_page' => (int)ceil($total / $perPage),
+            ]);
         }
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        $products = $stmt->fetchAll();
+        $rows = array_map('cast_product', $stmt->fetchAll());
 
-        // Format numeric types and timestamps for JSON response
-        foreach ($products as &$item) {
-            $item['id'] = (int)$item['id'];
-            $item['category_id'] = (int)$item['category_id'];
-            $item['collection_id'] = $item['collection_id'] ? (int)$item['collection_id'] : null;
-            $item['price'] = (float)$item['price'];
-            $item['original_price'] = $item['original_price'] ? (float)$item['original_price'] : null;
-            $item['rating'] = (float)$item['rating'];
-            $item['reviews_count'] = (int)$item['reviews_count'];
-            $item['has_offer'] = (bool)$item['has_offer'];
-            $item['is_featured'] = (bool)$item['is_featured'];
-            $item['is_trending'] = (bool)$item['is_trending'];
-        }
-
-        echo json_encode(["status" => "success", "count" => count($products), "data" => $products]);
-
-    } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Database query failed: " . $e->getMessage()]);
+        json_out([
+            'status'  => 'success',
+            'success' => true,
+            'message' => 'Products fetched',
+            'data'    => $rows,
+            'count'   => count($rows),
+            'total'   => count($rows),
+        ]);
     }
-} else if ($method === 'POST') {
-    try {
-        $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input) {
-            $input = $_POST;
+    // =====================================================================
+    // POST - create product (admin)
+    // =====================================================================
+    if ($method === 'POST') {
+        $d = request_data();
+
+        // Required fields.
+        $name  = trim($d['name'] ?? '');
+        $price = $d['price'] ?? null;
+        $image = trim($d['image'] ?? '');
+
+        if ($name === '')          api_error('Product name is required', 422);
+        if ($price === null || !is_numeric($price) || (float)$price <= 0) {
+            api_error('A valid price greater than 0 is required', 422);
+        }
+        if ($image === '')         api_error('A product image is required', 422);
+        if (mb_strlen($name) > 255) api_error('Product name is too long (max 255 characters)', 422);
+
+        // Optional / derived fields.
+        $categoryTable = "categories";
+        $categoryId = (int)($d['category_id'] ?? 0);
+        if ($categoryId > 0) {
+            $chk = $pdo->prepare("SELECT id FROM `$categoryTable` WHERE id = :id");
+            $chk->execute([':id' => $categoryId]);
+            if (!$chk->fetch()) api_error('Selected category does not exist', 422);
+        } else {
+            $categoryId = 1; // Default: Living Room
         }
 
-        $name = isset($input['name']) ? trim($input['name']) : '';
-        $category_id = isset($input['category_id']) ? intval($input['category_id']) : 0;
-        $price = isset($input['price']) ? floatval($input['price']) : 0.0;
-        $image = isset($input['image']) ? trim($input['image']) : '';
+        $collectionId = !empty($d['collection_id']) ? (int)$d['collection_id'] : null;
 
-        if (empty($name) || $category_id <= 0 || $price <= 0 || empty($image)) {
-            http_response_code(400);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Required fields missing: name, category_id, price, and image are required"
-            ]);
-            exit();
+        $originalPrice = !empty($d['original_price']) && is_numeric($d['original_price']) ? (float)$d['original_price'] : null;
+        $discountPrice = isset($d['discount_price']) && $d['discount_price'] !== '' && is_numeric($d['discount_price'])
+            ? (float)$d['discount_price'] : null;
+
+        $stockQty = isset($d['stock_quantity']) && is_numeric($d['stock_quantity']) ? max(0, (int)$d['stock_quantity']) : 25;
+
+        // Additional images: accept an array or comma-separated string; store as JSON.
+        $additional = $d['additional_images'] ?? [];
+        if (is_string($additional)) {
+            $additional = array_values(array_filter(array_map('trim', explode(',', $additional))));
+        }
+        if (!is_array($additional)) {
+            $additional = [];
+        }
+        $additionalJson = json_encode(array_slice($additional, 0, 10));
+
+        $status = ($d['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active';
+        $stockStatus = trim($d['stock_status'] ?? '');
+        if ($stockStatus === '') {
+            // Derive a sensible stock label from the quantity.
+            if ($stockQty <= 0)            $stockStatus = 'Out of Stock';
+            elseif ($stockQty <= 5)        $stockStatus = 'Low Stock';
+            else                           $stockStatus = 'In Stock';
         }
 
-        $collection_id = !empty($input['collection_id']) ? intval($input['collection_id']) : null;
-        $original_price = !empty($input['original_price']) ? floatval($input['original_price']) : null;
-        $back_image = !empty($input['back_image']) ? trim($input['back_image']) : $image;
-        $description = isset($input['description']) ? trim($input['description']) : '';
-        $dimensions = !empty($input['dimensions']) ? trim($input['dimensions']) : 'W: 180cm x D: 90cm x H: 85cm';
-        $material = !empty($input['material']) ? trim($input['material']) : 'Solid Teak Wood & Velvet';
-        $rating = isset($input['rating']) ? floatval($input['rating']) : 4.5;
-        $reviews_count = isset($input['reviews_count']) ? intval($input['reviews_count']) : 0;
-        $has_offer = !empty($input['has_offer']) ? 1 : 0;
-        $offer_end_time = !empty($input['offer_end_time']) ? $input['offer_end_time'] : null;
-        $is_featured = !empty($input['is_featured']) ? 1 : 0;
-        $is_trending = !empty($input['is_trending']) ? 1 : 0;
-        $stock_status = !empty($input['stock_status']) ? trim($input['stock_status']) : 'In Stock';
+        $slug = !empty($d['slug']) ? make_slug($pdo, $d['slug'], '`products`') : make_slug($pdo, $name, '`products`');
 
-        $stmt = $pdo->prepare("INSERT INTO products (
-            category_id, collection_id, name, price, original_price, image, back_image,
-            description, dimensions, material, rating, reviews_count, has_offer,
-            offer_end_time, is_featured, is_trending, stock_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-
+        $stmt = $pdo->prepare(
+            "INSERT INTO products
+                (category_id, collection_id, name, slug, price, original_price, discount_price,
+                 stock_quantity, image, back_image, additional_images, description, dimensions,
+                 material, color, rating, reviews_count, has_offer, offer_end_time,
+                 is_featured, is_trending, stock_status, status)
+             VALUES
+                (:category_id, :collection_id, :name, :slug, :price, :original_price, :discount_price,
+                 :stock_quantity, :image, :back_image, :additional_images, :description, :dimensions,
+                 :material, :color, :rating, :reviews_count, :has_offer, :offer_end_time,
+                 :is_featured, :is_trending, :stock_status, :status)"
+        );
         $stmt->execute([
-            $category_id, $collection_id, $name, $price, $original_price, $image, $back_image,
-            $description, $dimensions, $material, $rating, $reviews_count, $has_offer,
-            $offer_end_time, $is_featured, $is_trending, $stock_status
+            ':category_id'       => $categoryId,
+            ':collection_id'     => $collectionId,
+            ':name'              => $name,
+            ':slug'              => $slug,
+            ':price'             => (float)$price,
+            ':original_price'    => $originalPrice,
+            ':discount_price'    => $discountPrice,
+            ':stock_quantity'    => $stockQty,
+            ':image'             => $image,
+            ':back_image'        => !empty($d['back_image']) ? trim($d['back_image']) : $image,
+            ':additional_images' => $additionalJson,
+            ':description'       => trim($d['description'] ?? ''),
+            ':dimensions'        => !empty($d['dimensions']) ? trim($d['dimensions']) : null,
+            ':material'          => !empty($d['material']) ? trim($d['material']) : null,
+            ':color'             => !empty($d['color']) ? trim($d['color']) : null,
+            ':rating'            => isset($d['rating']) && is_numeric($d['rating']) ? min(5.0, max(1.0, (float)$d['rating'])) : 4.5,
+            ':reviews_count'     => (int)($d['reviews_count'] ?? 0),
+            ':has_offer'         => !empty($d['has_offer']) ? 1 : 0,
+            ':offer_end_time'    => !empty($d['offer_end_time']) ? $d['offer_end_time'] : null,
+            ':is_featured'       => !empty($d['is_featured']) ? 1 : 0,
+            ':is_trending'       => !empty($d['is_trending']) ? 1 : 0,
+            ':stock_status'      => $stockStatus,
+            ':status'            => $status,
         ]);
 
         $newId = (int)$pdo->lastInsertId();
 
-        // Fetch inserted product details with category and collection details
-        $fetchStmt = $pdo->prepare("SELECT p.*, c.name as category_name, c.slug as category_slug, col.title as collection_title, col.slug as collection_slug 
-                                    FROM products p 
-                                    LEFT JOIN categories c ON p.category_id = c.id 
-                                    LEFT JOIN collections col ON p.collection_id = col.id 
-                                    WHERE p.id = ?");
-        $fetchStmt->execute([$newId]);
-        $newProduct = $fetchStmt->fetch();
+        $fetch = $pdo->prepare(
+            "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
+                    col.title AS collection_title, col.slug AS collection_slug
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.category_id
+             LEFT JOIN collections col ON col.id = p.collection_id
+             WHERE p.id = :id"
+        );
+        $fetch->execute([':id' => $newId]);
+        $row = cast_product($fetch->fetch());
 
-        http_response_code(201);
-        echo json_encode([
-            "status" => "success",
-            "message" => "Product stored successfully in database",
-            "data" => $newProduct
-        ]);
-
-    } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Failed to store product: " . $e->getMessage()]);
+        json_out([
+            'status'  => 'success',
+            'success' => true,
+            'message' => 'Product stored in database',
+            'data'    => $row,
+        ], 201);
     }
-} else if ($method === 'DELETE') {
-    try {
-        $input = json_decode(file_get_contents('php://input'), true);
-        $id = isset($_GET['id']) ? intval($_GET['id']) : (isset($input['id']) ? intval($input['id']) : null);
 
-        if (!$id) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "Product ID required for deletion"]);
-            exit();
+    // =====================================================================
+    // PUT - update product (admin). Accepts full form or single-field patch.
+    // =====================================================================
+    if ($method === 'PUT') {
+        $d = request_data();
+        $id = (int)($d['id'] ?? 0);
+        if (!$id) api_error('Product id is required', 400);
+
+        $exists = $pdo->prepare("SELECT id FROM products WHERE id = :id");
+        $exists->execute([':id' => $id]);
+        if (!$exists->fetch()) api_error('Product not found', 404);
+
+        $allowed = ['name', 'price', 'original_price', 'discount_price', 'image', 'back_image',
+                    'description', 'dimensions', 'material', 'color', 'rating', 'reviews_count',
+                    'has_offer', 'offer_end_time', 'is_featured', 'is_trending',
+                    'stock_status', 'status', 'category_id', 'collection_id', 'stock_quantity', 'slug'];
+
+        $sets   = [];
+        $params = [':id' => $id];
+
+        foreach ($allowed as $col) {
+            if (!array_key_exists($col, $d)) continue;
+
+            $v = $d[$col];
+
+            // Field-level validation.
+            if ($col === 'name' && trim((string)$v) === '') api_error('Product name cannot be empty', 422);
+            if (in_array($col, ['price', 'discount_price'], true) && $v !== '' && $v !== null && (!is_numeric($v) || (float)$v < 0)) {
+                api_error("Invalid value for $col", 422);
+            }
+            if ($col === 'status' && !in_array($v, ['active', 'inactive'], true)) api_error('Invalid status', 422);
+            if ($col === 'rating' && $v !== '' && $v !== null) {
+                $v = min(5.0, max(1.0, (float)$v));
+            }
+
+            // Normalize additional_images to JSON if provided.
+            if ($col === 'additional_images') {
+                if (is_string($v)) {
+                    $v = array_values(array_filter(array_map('trim', explode(',', $v))));
+                }
+                $v = json_encode(is_array($v) ? array_slice($v, 0, 10) : []);
+            }
+
+            // Empty price-ish values become NULL.
+            if (in_array($col, ['original_price', 'discount_price', 'offer_end_time', 'collection_id'], true) && ($v === '' || $v === null)) {
+                $v = null;
+            }
+
+            $sets[] = "`$col` = :$col";
+            $params[":$col"] = $v;
         }
 
-        $stmt = $pdo->prepare("DELETE FROM products WHERE id = ?");
-        $stmt->execute([$id]);
+        // Auto-regenerate slug when the name changes (unless a slug is given).
+        if (isset($d['name']) && !isset($d['slug'])) {
+            $sets[] = "`slug` = :slug_auto";
+            $params[':slug_auto'] = make_slug($pdo, $d['name'], '`products`', $id);
+        }
 
-        echo json_encode(["status" => "success", "message" => "Product deleted successfully from database"]);
-    } catch (PDOException $e) {
-        http_response_code(500);
-        echo json_encode(["status" => "error", "message" => "Failed to delete product: " . $e->getMessage()]);
+        if (!$sets) api_error('Nothing to update', 400);
+
+        $stmt = $pdo->prepare("UPDATE products SET " . implode(', ', $sets) . " WHERE id = :id");
+        $stmt->execute($params);
+
+        $fetch = $pdo->prepare(
+            "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
+                    col.title AS collection_title, col.slug AS collection_slug
+             FROM products p
+             LEFT JOIN categories c ON c.id = p.category_id
+             LEFT JOIN collections col ON col.id = p.collection_id
+             WHERE p.id = :id"
+        );
+        $fetch->execute([':id' => $id]);
+        $row = cast_product($fetch->fetch());
+
+        api_success($row, 'Product updated');
     }
-} else {
-    http_response_code(405);
-    echo json_encode(["status" => "error", "message" => "Method not allowed"]);
-}
 
+    // =====================================================================
+    // DELETE - remove product (admin)
+    // =====================================================================
+    if ($method === 'DELETE') {
+        $id = (int)($_GET['id'] ?? 0);
+        if (!$id) {
+            $d = request_data();
+            $id = (int)($d['id'] ?? 0);
+        }
+        if (!$id) api_error('Product id is required', 400);
+
+        $stmt = $pdo->prepare("DELETE FROM products WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+
+        if ($stmt->rowCount() === 0) api_error('Product not found', 404);
+
+        api_success(['id' => $id], 'Product deleted from database');
+    }
+
+    api_error('Method not allowed', 405);
+
+} catch (PDOException $e) {
+    // Log internally; never expose SQL details to the client.
+    error_log('[FurniShop API] products.php PDOException: ' . $e->getMessage());
+    api_error('Something went wrong while processing your request', 500);
+} catch (Throwable $e) {
+    error_log('[FurniShop API] products.php Throwable: ' . $e->getMessage());
+    api_error('Something went wrong while processing your request', 500);
+}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { FaShoppingCart, FaHeart, FaStar, FaEye, FaSyncAlt } from "react-icons/fa";
+import { resolveImageUrl } from "./api";
 
 const DEFAULT_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
 const BACK_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=800&q=80";
@@ -102,7 +103,7 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
           {/* Product Image */}
           <div className="card-image-wrapper" onClick={() => onQuickView(item)}>
             <img
-              src={item.image}
+              src={resolveImageUrl(item.image)}
               alt={item.name}
               loading="lazy"
               onError={(e) => {
@@ -127,7 +128,7 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
             </div>
 
             <div className="price-row">
-              <span className="current-price">₹{Number(item.price).toLocaleString()}</span>
+              <span className="current-price">₹{Number(item.discount_price && item.discount_price < item.price ? item.discount_price : item.price).toLocaleString()}</span>
               {item.original_price && (
                 <span className="original-price">₹{Number(item.original_price).toLocaleString()}</span>
               )}
@@ -135,12 +136,13 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
 
             <button
               className="add-to-cart-btn"
+              disabled={item.stock_quantity === 0 || item.stock_status === "Out of Stock"}
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddToCart(item);
               }}
             >
-              <FaShoppingCart /> Add to Cart
+              <FaShoppingCart /> {item.stock_quantity === 0 || item.stock_status === "Out of Stock" ? "Out of Stock" : "Add to Cart"}
             </button>
           </div>
         </div>
@@ -159,7 +161,7 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
           </button>
           <div className="card-back-image-wrapper" onClick={() => setFlipped(false)}>
             <img
-              src={item.back_image || item.backImage || item.image}
+              src={resolveImageUrl(item.back_image || item.backImage || item.image)}
               alt={`${item.name} Detail`}
               loading="lazy"
               onError={(e) => {

@@ -7,6 +7,7 @@ import CartDrawer from "./CartDrawer";
 import CheckoutModal from "./CheckoutModal";
 import WishlistModal from "./WishlistModal";
 import AddProductModal from "./AddProductModal";
+import AdminPanelModal from "./AdminPanelModal";
 import Footer from "./Footer";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -31,6 +32,8 @@ function App() {
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
 
   // Toggle Dark/Light Theme
@@ -86,11 +89,12 @@ function App() {
   }, [activeCategory, activeCollection, searchTerm, sortBy]);
 
   useEffect(() => {
-    loadInitialData();
+    // Deferred so state updates don't cascade synchronously inside the effect.
+    queueMicrotask(() => loadInitialData());
   }, [loadInitialData]);
 
   useEffect(() => {
-    fetchProducts();
+    queueMicrotask(() => fetchProducts());
   }, [fetchProducts]);
 
   // Smooth scroll focus to products section when active search query is entered
@@ -106,24 +110,36 @@ function App() {
     }
   }, [searchTerm]);
 
-  // Store product handler
-  const handleProductAdded = async (productData) => {
-    try {
-      const res = await api.createProduct(productData);
-      if (res.status === "success") {
-        toast.success(`🎉 "${productData.name}" successfully stored in database!`, {
-          position: "top-right",
-          autoClose: 3000,
-          theme: theme === "dark" ? "dark" : "colored"
-        });
-        await fetchProducts();
-      } else {
-        throw new Error(res.message || "Failed to store product");
-      }
-    } catch (err) {
-      toast.error(`Error: ${err.message}`);
-      throw err;
+  // Store / update product handler (used by the admin product form)
+  const handleProductSaved = async (savedProduct, wasEdit) => {
+    if (wasEdit) {
+      toast.success(`💾 "${savedProduct?.name || "Product"}" updated in database!`, {
+        position: "top-right",
+        autoClose: 3000,
+        theme: theme === "dark" ? "dark" : "colored"
+      });
+    } else {
+      toast.success(`🎉 "${savedProduct?.name || "Product"}" successfully stored in database!`, {
+        position: "top-right",
+        autoClose: 3000,
+        theme: theme === "dark" ? "dark" : "colored"
+      });
     }
+    await fetchProducts();
+    loadInitialData(); // refresh category counts
+  };
+
+  /** Open the product form pre-filled for editing. */
+  const handleEditProduct = (product) => {
+    setEditingProduct(product);
+    setIsAdminPanelOpen(false);
+    setIsAddProductOpen(true);
+  };
+
+  /** Open the form for a brand new product. */
+  const handleOpenAddProduct = () => {
+    setEditingProduct(null);
+    setIsAddProductOpen(true);
   };
 
   // Cart operations with PHP API
@@ -142,7 +158,7 @@ function App() {
       } else {
         toast.error(res.message);
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to update cart");
     }
   };
@@ -154,7 +170,7 @@ function App() {
         const cartRes = await api.getCart();
         if (cartRes.status === "success") setCartItems(cartRes.data || []);
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to update cart item");
     }
   };
@@ -167,7 +183,7 @@ function App() {
         if (cartRes.status === "success") setCartItems(cartRes.data || []);
         toast.info("Item removed from cart");
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to remove cart item");
     }
   };
@@ -189,7 +205,7 @@ function App() {
           toast.info(`Removed ${item.name} from wishlist`);
         }
       }
-    } catch (err) {
+    } catch {
       toast.error("Wishlist sync failed");
     }
   };
@@ -203,6 +219,12 @@ function App() {
     return res;
   };
 
+  /** Remove a product from the storefront list after admin deletion. */
+  const handleProductDeleted = (productId) => {
+    setProducts((prev) => prev.filter((p) => p.id !== productId));
+    loadInitialData();
+  };
+
   const totalCartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
@@ -213,7 +235,8 @@ function App() {
         wishlistCount={wishlistItems.length}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenWishlist={() => setIsWishlistOpen(true)}
-        onOpenAddProduct={() => setIsAddProductOpen(true)}
+        onOpenAddProduct={handleOpenAddProduct}
+        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         activeCategory={activeCategory}
@@ -260,11 +283,13 @@ function App() {
 
       {/* Modals & Slide-out Drawers */}
       <QuickViewModal
+        key={quickViewProduct ? `qv-${quickViewProduct.id}` : "qv-none"}
         product={quickViewProduct}
         onClose={() => setQuickViewProduct(null)}
         handleAddToCart={handleAddToCart}
         handleWishlist={handleWishlist}
         isWishlisted={quickViewProduct ? wishlistItems.some((w) => w.id === quickViewProduct.id) : false}
+        onBuyNow={() => setIsCheckoutOpen(true)}
       />
 
       <CartDrawer
@@ -295,11 +320,25 @@ function App() {
       />
 
       <AddProductModal
+        key={editingProduct ? `ap-${editingProduct.id}` : "ap-new"}
         isOpen={isAddProductOpen}
-        onClose={() => setIsAddProductOpen(false)}
+        onClose={() => {
+          setIsAddProductOpen(false);
+          setEditingProduct(null);
+        }}
         categories={categories}
         collections={collections}
-        onProductAdded={handleProductAdded}
+        editingProduct={editingProduct}
+        onProductSaved={handleProductSaved}
+      />
+
+      <AdminPanelModal
+        isOpen={isAdminPanelOpen}
+        onClose={() => setIsAdminPanelOpen(false)}
+        onOpenAddProduct={handleOpenAddProduct}
+        onEditProduct={handleEditProduct}
+        onProductDeleted={handleProductDeleted}
+        theme={theme}
       />
 
       {/* Mobile Sticky Bottom Quick Bar */}

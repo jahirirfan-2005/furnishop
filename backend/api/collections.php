@@ -2,20 +2,20 @@
 require_once __DIR__ . '/config.php';
 
 try {
-    $stmt = $pdo->query("SELECT col.*, COUNT(p.id) as product_count 
-                         FROM collections col 
-                         LEFT JOIN products p ON col.id = p.collection_id 
-                         GROUP BY col.id 
-                         ORDER BY col.id ASC");
-    $collections = $stmt->fetchAll();
-
-    foreach ($collections as &$col) {
-        $col['id'] = (int)$col['id'];
-        $col['product_count'] = (int)$col['product_count'];
-    }
-
-    echo json_encode(["status" => "success", "data" => $collections]);
+    $stmt = $pdo->query(
+        "SELECT col.id, col.title, col.slug, col.subtitle, col.banner_image, col.discount_tag,
+                (SELECT COUNT(*) FROM `$db`.products p
+                  WHERE p.collection_id = col.id AND p.status = 'active') AS products_count
+         FROM `$db`.collections col
+         ORDER BY col.id ASC"
+    );
+    $rows = array_map(function ($r) {
+        $r['id'] = (int)$r['id'];
+        $r['products_count'] = (int)$r['products_count'];
+        return $r;
+    }, $stmt->fetchAll());
+    echo json_encode(["status" => "success", "success" => true, "data" => $rows]);
 } catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+    error_log('[FurniShop API] collections.php: ' . $e->getMessage());
+    json_out(["status" => "error", "success" => false, "message" => "Something went wrong"], 500);
 }

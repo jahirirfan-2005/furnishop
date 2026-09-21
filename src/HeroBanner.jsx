@@ -1,7 +1,7 @@
 import React from "react";
 import { FaTruck, FaShieldAlt, FaHeadset, FaUndoAlt, FaArrowRight } from "react-icons/fa";
 
-function HeroBanner({ collections, onSelectCollection }) {
+function HeroBanner({ onSelectCollection }) {
   return (
     <div className="hero-banner-container">
       <div className="hero-content">

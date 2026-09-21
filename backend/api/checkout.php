@@ -1,87 +1,96 @@
 <?php
 require_once __DIR__ . '/config.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode(["status" => "error", "message" => "Method not allowed"]);
-    exit();
-}
-
-$input = json_decode(file_get_contents('php://input'), true);
-
-$customerName = isset($input['customer_name']) ? trim($input['customer_name']) : '';
-$customerEmail = isset($input['customer_email']) ? trim($input['customer_email']) : '';
-$customerPhone = isset($input['customer_phone']) ? trim($input['customer_phone']) : '';
-$shippingAddress = isset($input['shipping_address']) ? trim($input['shipping_address']) : '';
-$paymentMethod = isset($input['payment_method']) ? trim($input['payment_method']) : 'Credit Card';
-$sessionId = isset($input['session_id']) ? $input['session_id'] : 'guest_session';
-$items = isset($input['items']) ? $input['items'] : [];
-
-if (empty($customerName) || empty($customerEmail) || empty($shippingAddress) || empty($items)) {
-    http_response_code(400);
-    echo json_encode(["status" => "error", "message" => "Please complete all required fields (Name, Email, Address, Cart Items)"]);
-    exit();
-}
-
 try {
-    $pdo->beginTransaction();
-
-    // Calculate total amount
-    $totalAmount = 0;
-    foreach ($items as $item) {
-        $price = floatval($item['price']);
-        $qty = intval($item['quantity']);
-        $totalAmount += $price * $qty;
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        json_out(["status" => "error", "message" => "Method not allowed"], 405);
     }
 
-    // Generate Order Number
-    $orderNumber = 'FURNI-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 8));
+    $d = request_data();
+    $sid = $d['session_id'] ?? '';
 
-    // Insert Order
-    $stmtOrder = $pdo->prepare("INSERT INTO orders 
-        (order_number, customer_name, customer_email, customer_phone, shipping_address, payment_method, total_amount, status) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'Processing')");
-    $stmtOrder->execute([
-        $orderNumber,
-        $customerName,
-        $customerEmail,
-        $customerPhone,
-        $shippingAddress,
-        $paymentMethod,
-        $totalAmount
+    if (empty($d['customer_name']) || empty($d['customer_email']) || empty($d['shipping_address'])) {
+        json_out(["status" => "error", "message" => "customer_name, customer_email and shipping_address are required"], 400);
+    }
+
+    $items = $d['items'] ?? [];
+    if (!$items && $sid) {
+        // Fall back to the server-side cart contents
+        $stmt = $pdo->prepare(
+            "SELECT p.*, ci.quantity FROM `$db`.cart_items ci
+             JOIN `$db`.products p ON p.id = ci.product_id
+             WHERE ci.session_id = :sid"
+        );
+        $stmt->execute([':sid' => $sid]);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as $r) {
+            $items[] = [
+                'id'       => (int)$r['id'],
+                'name'     => $r['name'],
+                'image'    => $r['image'],
+                'price'    => (float)$r['price'],
+                'quantity' => (int)$r['quantity'],
+            ];
+        }
+    }
+
+    if (!$items) json_out(["status" => "error", "message" => "No items to order"], 400);
+
+    $total = 0.0;
+    foreach ($items as $it) {
+        $total += ((float)($it['price'] ?? 0)) * max(1, (int)($it['quantity'] ?? 1));
+    }
+
+    $orderNumber = 'FURNI-' . strtoupper(bin2hex(random_bytes(4)));
+
+    $pdo->beginTransaction();
+
+    $stmt = $pdo->prepare(
+        "INSERT INTO `$db`.orders
+         (order_number, customer_name, customer_email, customer_phone, shipping_address, payment_method, total_amount, status)
+         VALUES (:on, :cn, :ce, :cp, :sa, :pm, :total, 'Processing')"
+    );
+    $stmt->execute([
+        ':on'     => $orderNumber,
+        ':cn'     => trim($d['customer_name']),
+        ':ce'     => trim($d['customer_email']),
+        ':cp'     => $d['customer_phone'] ?? null,
+        ':sa'     => trim($d['shipping_address']),
+        ':pm'     => $d['payment_method'] ?? 'Credit Card',
+        ':total'  => $total,
     ]);
+    $orderId = (int)$pdo->lastInsertId();
 
-    $orderId = $pdo->lastInsertId();
-
-    // Insert Order Items
-    $stmtItem = $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)");
-    foreach ($items as $item) {
-        $stmtItem->execute([
-            $orderId,
-            intval($item['id']),
-            intval($item['quantity']),
-            floatval($item['price'])
+    $itemStmt = $pdo->prepare(
+        "INSERT INTO `$db`.order_items (order_id, product_id, product_name, product_image, quantity, price)
+         VALUES (:oid, :pid, :pname, :pimg, :qty, :price)"
+    );
+    foreach ($items as $it) {
+        $itemStmt->execute([
+            ':oid'   => $orderId,
+            ':pid'   => !empty($it['id']) ? (int)$it['id'] : null,
+            ':pname' => $it['name'] ?? 'Unknown product',
+            ':pimg'  => $it['image'] ?? null,
+            ':qty'   => max(1, (int)($it['quantity'] ?? 1)),
+            ':price' => (float)($it['price'] ?? 0),
         ]);
     }
 
-    // Clear user's session cart in database
-    $stmtClear = $pdo->prepare("DELETE FROM cart WHERE session_id = ?");
-    $stmtClear->execute([$sessionId]);
+    // Clear this session's cart after a successful order
+    if ($sid) {
+        $del = $pdo->prepare("DELETE FROM `$db`.cart_items WHERE session_id = :sid");
+        $del->execute([':sid' => $sid]);
+    }
 
     $pdo->commit();
 
     echo json_encode([
-        "status" => "success",
-        "message" => "Order successfully placed!",
+        "status"       => "success",
         "order_number" => $orderNumber,
-        "total_amount" => $totalAmount,
-        "customer_name" => $customerName
+        "total_amount" => $total,
+        "message"      => "Order placed successfully and stored in database",
     ]);
-
 } catch (PDOException $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-    http_response_code(500);
-    echo json_encode(["status" => "error", "message" => "Failed to process order: " . $e->getMessage()]);
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
 }

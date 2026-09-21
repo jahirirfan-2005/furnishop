@@ -1,129 +1,100 @@
 <?php
 require_once __DIR__ . '/config.php';
 
-$method = $_SERVER['REQUEST_METHOD'];
-$sessionId = isset($_GET['session_id']) ? $_GET['session_id'] : (isset($_SERVER['HTTP_X_SESSION_ID']) ? $_SERVER['HTTP_X_SESSION_ID'] : 'guest_session');
+$table = "`" . $db . "`";
 
-switch ($method) {
-    case 'GET':
-        // Fetch cart items for session
-        try {
-            $stmt = $pdo->prepare("SELECT c.id as cart_id, c.quantity, p.* 
-                                   FROM cart c 
-                                   JOIN products p ON c.product_id = p.id 
-                                   WHERE c.session_id = ?");
-            $stmt->execute([$sessionId]);
-            $items = $stmt->fetchAll();
+try {
+    // ---------- GET: cart contents + subtotal ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $sid = $_GET['session_id'] ?? '';
+        if (!$sid) json_out(["status" => "error", "message" => "session_id required"], 400);
 
-            $totalAmount = 0;
-            foreach ($items as &$item) {
-                $item['cart_id'] = (int)$item['cart_id'];
-                $item['id'] = (int)$item['id'];
-                $item['price'] = (float)$item['price'];
-                $item['quantity'] = (int)$item['quantity'];
-                $totalAmount += $item['price'] * $item['quantity'];
-            }
+        $stmt = $pdo->prepare(
+            "SELECT p.*, ci.quantity, ci.id AS cart_id,
+                    (p.price * ci.quantity) AS subtotal,
+                    c.name AS category_name, col.title AS collection_title
+             FROM `$db`.cart_items ci
+             JOIN `$db`.products p ON p.id = ci.product_id
+             LEFT JOIN `$db`.categories c ON c.id = p.category_id
+             LEFT JOIN `$db`.collections col ON col.id = p.collection_id
+             WHERE ci.session_id = :sid
+             ORDER BY ci.created_at ASC"
+        );
+        $stmt->execute([':sid' => $sid]);
+        $rows = array_map('cast_product', $stmt->fetchAll());
 
-            echo json_encode([
-                "status" => "success",
-                "session_id" => $sessionId,
-                "count" => count($items),
-                "total_amount" => $totalAmount,
-                "data" => $items
-            ]);
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
+        foreach ($rows as &$r) {
+            $r['cart_id'] = (int)$r['cart_id'];
+            $r['quantity'] = (int)$r['quantity'];
+            $r['subtotal'] = (float)$r['subtotal'];
         }
-        break;
+        unset($r);
 
-    case 'POST':
-        // Add item to cart or update quantity if exists
-        $input = json_decode(file_get_contents('php://input'), true);
-        $productId = isset($input['product_id']) ? intval($input['product_id']) : null;
-        $quantity = isset($input['quantity']) ? max(1, intval($input['quantity'])) : 1;
-        $sessId = isset($input['session_id']) ? $input['session_id'] : $sessionId;
+        $subtotal = array_sum(array_column($rows, 'subtotal'));
+        echo json_encode(["status" => "success", "count" => count($rows), "data" => $rows, "subtotal" => $subtotal]);
+        exit();
+    }
 
-        if (!$productId) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "product_id is required"]);
+    // ---------- POST: add to cart ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $d = request_data();
+        $sid = $d['session_id'] ?? '';
+        $pid = (int)($d['product_id'] ?? 0);
+        $qty = max(1, (int)($d['quantity'] ?? 1));
+        if (!$sid || !$pid) json_out(["status" => "error", "message" => "session_id and product_id required"], 400);
+
+        // Ensure product exists
+        $chk = $pdo->prepare("SELECT id FROM `$db`.products WHERE id = :pid");
+        $chk->execute([':pid' => $pid]);
+        if (!$chk->fetch()) json_out(["status" => "error", "message" => "Product not found"], 404);
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO `$db`.cart_items (session_id, product_id, quantity)
+             VALUES (:sid, :pid, :qty)
+             ON DUPLICATE KEY UPDATE quantity = quantity + :qty2"
+        );
+        $stmt->execute([':sid' => $sid, ':pid' => $pid, ':qty' => $qty, ':qty2' => $qty]);
+
+        echo json_encode(["status" => "success", "message" => "Item added to cart"]);
+        exit();
+    }
+
+    // ---------- PUT: update quantity (0 deletes) ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+        $d = request_data();
+        $sid = $d['session_id'] ?? '';
+        $pid = (int)($d['product_id'] ?? 0);
+        $qty = (int)($d['quantity'] ?? 0);
+        if (!$sid || !$pid) json_out(["status" => "error", "message" => "session_id and product_id required"], 400);
+
+        if ($qty <= 0) {
+            $stmt = $pdo->prepare("DELETE FROM `$db`.cart_items WHERE session_id = :sid AND product_id = :pid");
+            $stmt->execute([':sid' => $sid, ':pid' => $pid]);
+            echo json_encode(["status" => "success", "message" => "Item removed"]);
             exit();
         }
 
-        try {
-            // Check if product exists in cart
-            $stmtCheck = $pdo->prepare("SELECT id, quantity FROM cart WHERE session_id = ? AND product_id = ?");
-            $stmtCheck->execute([$sessId, $productId]);
-            $existing = $stmtCheck->fetch();
+        $stmt = $pdo->prepare("UPDATE `$db`.cart_items SET quantity = :qty WHERE session_id = :sid AND product_id = :pid");
+        $stmt->execute([':sid' => $sid, ':pid' => $pid, ':qty' => $qty]);
+        echo json_encode(["status" => "success", "message" => "Cart updated"]);
+        exit();
+    }
 
-            if ($existing) {
-                $newQty = $existing['quantity'] + $quantity;
-                $stmtUpdate = $pdo->prepare("UPDATE cart SET quantity = ? WHERE id = ?");
-                $stmtUpdate->execute([$newQty, $existing['id']]);
-            } else {
-                $stmtInsert = $pdo->prepare("INSERT INTO cart (session_id, product_id, quantity) VALUES (?, ?, ?)");
-                $stmtInsert->execute([$sessId, $productId, $quantity]);
-            }
+    // ---------- DELETE: remove item ----------
+    if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
+        $d = request_data();
+        $sid = $d['session_id'] ?? ($_GET['session_id'] ?? '');
+        $pid = (int)($d['product_id'] ?? ($_GET['product_id'] ?? 0));
+        if (!$sid || !$pid) json_out(["status" => "error", "message" => "session_id and product_id required"], 400);
 
-            echo json_encode(["status" => "success", "message" => "Item added to cart"]);
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-        }
-        break;
+        $stmt = $pdo->prepare("DELETE FROM `$db`.cart_items WHERE session_id = :sid AND product_id = :pid");
+        $stmt->execute([':sid' => $sid, ':pid' => $pid]);
+        echo json_encode(["status" => "success", "message" => "Item removed from cart"]);
+        exit();
+    }
 
-    case 'PUT':
-        // Update item quantity
-        $input = json_decode(file_get_contents('php://input'), true);
-        $productId = isset($input['product_id']) ? intval($input['product_id']) : null;
-        $quantity = isset($input['quantity']) ? intval($input['quantity']) : 1;
-        $sessId = isset($input['session_id']) ? $input['session_id'] : $sessionId;
+    json_out(["status" => "error", "message" => "Method not allowed"], 405);
 
-        if (!$productId) {
-            http_response_code(400);
-            echo json_encode(["status" => "error", "message" => "product_id is required"]);
-            exit();
-        }
-
-        try {
-            if ($quantity <= 0) {
-                $stmtDelete = $pdo->prepare("DELETE FROM cart WHERE session_id = ? AND product_id = ?");
-                $stmtDelete->execute([$sessId, $productId]);
-            } else {
-                $stmtUpdate = $pdo->prepare("UPDATE cart SET quantity = ? WHERE session_id = ? AND product_id = ?");
-                $stmtUpdate->execute([$quantity, $sessId, $productId]);
-            }
-            echo json_encode(["status" => "success", "message" => "Cart updated"]);
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-        }
-        break;
-
-    case 'DELETE':
-        // Remove item or clear cart
-        $input = json_decode(file_get_contents('php://input'), true);
-        $productId = isset($input['product_id']) ? intval($input['product_id']) : (isset($_GET['product_id']) ? intval($_GET['product_id']) : null);
-        $sessId = isset($input['session_id']) ? $input['session_id'] : $sessionId;
-
-        try {
-            if ($productId) {
-                $stmt = $pdo->prepare("DELETE FROM cart WHERE session_id = ? AND product_id = ?");
-                $stmt->execute([$sessId, $productId]);
-                echo json_encode(["status" => "success", "message" => "Item removed from cart"]);
-            } else {
-                $stmt = $pdo->prepare("DELETE FROM cart WHERE session_id = ?");
-                $stmt->execute([$sessId]);
-                echo json_encode(["status" => "success", "message" => "Cart cleared"]);
-            }
-        } catch (PDOException $e) {
-            http_response_code(500);
-            echo json_encode(["status" => "error", "message" => $e->getMessage()]);
-        }
-        break;
-
-    default:
-        http_response_code(405);
-        echo json_encode(["status" => "error", "message" => "Method not allowed"]);
-        break;
+} catch (PDOException $e) {
+    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
 }
