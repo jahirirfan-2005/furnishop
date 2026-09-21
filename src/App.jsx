@@ -6,6 +6,7 @@ import QuickViewModal from "./QuickViewModal";
 import CartDrawer from "./CartDrawer";
 import CheckoutModal from "./CheckoutModal";
 import WishlistModal from "./WishlistModal";
+import AddProductModal from "./AddProductModal";
 import Footer from "./Footer";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -29,6 +30,7 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
 
   // Toggle Dark/Light Theme
@@ -103,6 +105,26 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [searchTerm]);
+
+  // Store product handler
+  const handleProductAdded = async (productData) => {
+    try {
+      const res = await api.createProduct(productData);
+      if (res.status === "success") {
+        toast.success(`🎉 "${productData.name}" successfully stored in database!`, {
+          position: "top-right",
+          autoClose: 3000,
+          theme: theme === "dark" ? "dark" : "colored"
+        });
+        await fetchProducts();
+      } else {
+        throw new Error(res.message || "Failed to store product");
+      }
+    } catch (err) {
+      toast.error(`Error: ${err.message}`);
+      throw err;
+    }
+  };
 
   // Cart operations with PHP API
   const handleAddToCart = async (item, quantity = 1) => {
@@ -191,6 +213,7 @@ function App() {
         wishlistCount={wishlistItems.length}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenWishlist={() => setIsWishlistOpen(true)}
+        onOpenAddProduct={() => setIsAddProductOpen(true)}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         activeCategory={activeCategory}
@@ -269,6 +292,14 @@ function App() {
         onClose={() => setIsCheckoutOpen(false)}
         cartItems={cartItems}
         onOrderSuccess={handleCheckoutSuccess}
+      />
+
+      <AddProductModal
+        isOpen={isAddProductOpen}
+        onClose={() => setIsAddProductOpen(false)}
+        categories={categories}
+        collections={collections}
+        onProductAdded={handleProductAdded}
       />
 
       {/* Mobile Sticky Bottom Quick Bar */}

@@ -1,11 +1,12 @@
 import React, { useState } from "react";
-import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge } from "react-icons/fa";
+import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge, FaPlus } from "react-icons/fa";
 
 function Navbar({ 
   cartCount, 
   wishlistCount, 
   onOpenCart, 
   onOpenWishlist, 
+  onOpenAddProduct,
   searchTerm, 
   setSearchTerm,
   activeCategory,
@@ -97,6 +98,12 @@ function Navbar({
 
         {/* Navigation Action Icons */}
         <div className="nav-actions">
+          {/* Add Product Button */}
+          <button className="add-product-nav-btn" onClick={onOpenAddProduct} title="Store New Product">
+            <FaPlus className="add-icon" />
+            <span>Store Product</span>
+          </button>
+
           {/* Theme Toggle */}
           <button className="icon-btn theme-toggle" onClick={toggleTheme} title="Toggle Theme" aria-label="Toggle theme">
             {theme === "dark" ? <FaSun className="sun-icon" /> : <FaMoon className="moon-icon" />}

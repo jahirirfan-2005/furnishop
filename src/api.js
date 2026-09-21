@@ -259,6 +259,64 @@ export const api = {
     }
   },
 
+  async createProduct(productData) {
+    try {
+      const res = await fetch(`${API_BASE}/products.php`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(productData)
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "Failed to create product");
+      }
+      return await res.json();
+    } catch (err) {
+      console.warn("API Error, utilizing offline fallback for product creation:", err);
+      const categoryObj = MOCK_CATEGORIES.find(c => c.id == productData.category_id) || {};
+      const collectionObj = MOCK_COLLECTIONS.find(c => c.id == productData.collection_id) || {};
+
+      const newProduct = {
+        id: Date.now(),
+        category_id: Number(productData.category_id),
+        collection_id: productData.collection_id ? Number(productData.collection_id) : null,
+        category_name: categoryObj.name || "Living Room",
+        collection_title: collectionObj.title || "",
+        name: productData.name,
+        price: Number(productData.price),
+        original_price: productData.original_price ? Number(productData.original_price) : null,
+        image: productData.image,
+        back_image: productData.back_image || productData.image,
+        description: productData.description || "",
+        dimensions: productData.dimensions || "W: 180cm x D: 90cm x H: 85cm",
+        material: productData.material || "Solid Teak Wood",
+        rating: productData.rating ? Number(productData.rating) : 4.5,
+        reviews_count: 1,
+        has_offer: productData.has_offer ? 1 : 0,
+        is_featured: productData.is_featured ? 1 : 0,
+        is_trending: productData.is_trending ? 1 : 0,
+        stock_status: productData.stock_status || "In Stock"
+      };
+
+      MOCK_PRODUCTS.unshift(newProduct);
+      return { status: "success", message: "Product stored successfully (preview mode)", data: newProduct };
+    }
+  },
+
+  async deleteProduct(id) {
+    try {
+      const res = await fetch(`${API_BASE}/products.php?id=${id}`, {
+        method: "DELETE"
+      });
+      if (!res.ok) throw new Error("Failed to delete product");
+      return await res.json();
+    } catch (err) {
+      const idx = MOCK_PRODUCTS.findIndex(p => p.id == id);
+      if (idx > -1) MOCK_PRODUCTS.splice(idx, 1);
+      return { status: "success", message: "Product deleted" };
+    }
+  },
+
   async getCategories() {
     try {
       const res = await fetch(`${API_BASE}/categories.php`);

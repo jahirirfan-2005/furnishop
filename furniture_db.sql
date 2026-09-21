@@ -378,8 +378,10 @@ CREATE TABLE `newsletter_subscribers` (
   `email` varchar(150) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
+-- Example SQL query to store a new product in the database:
+-- INSERT INTO `products` 
+-- (`category_id`, `collection_id`, `name`, `price`, `original_price`, `image`, `back_image`, `description`, `dimensions`, `material`, `rating`, `reviews_count`, `has_offer`, `is_featured`, `is_trending`, `stock_status`) 
+-- VALUES 
+-- (1, 1, 'Nordic Solid Oak Lounge Chair', 16999.00, 21999.00, 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=800&q=80', 'https://images.unsplash.com/photo-1580481072645-022f9a6d8310?auto=format&fit=crop&w=800&q=80', 'Handcrafted solid white oak lounge chair with natural organic linen upholstery.', 'W: 78cm x D: 82cm x H: 86cm', 'Solid Oak & Natural Linen', 4.9, 15, 1, 1, 1, 'In Stock');
 
 SET FOREIGN_KEY_CHECKS = 1;

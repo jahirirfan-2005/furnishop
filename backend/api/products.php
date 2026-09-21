@@ -129,7 +129,97 @@ if ($method === 'GET') {
         http_response_code(500);
         echo json_encode(["status" => "error", "message" => "Database query failed: " . $e->getMessage()]);
     }
+} else if ($method === 'POST') {
+    try {
+        $input = json_decode(file_get_contents('php://input'), true);
+
+        if (!$input) {
+            $input = $_POST;
+        }
+
+        $name = isset($input['name']) ? trim($input['name']) : '';
+        $category_id = isset($input['category_id']) ? intval($input['category_id']) : 0;
+        $price = isset($input['price']) ? floatval($input['price']) : 0.0;
+        $image = isset($input['image']) ? trim($input['image']) : '';
+
+        if (empty($name) || $category_id <= 0 || $price <= 0 || empty($image)) {
+            http_response_code(400);
+            echo json_encode([
+                "status" => "error",
+                "message" => "Required fields missing: name, category_id, price, and image are required"
+            ]);
+            exit();
+        }
+
+        $collection_id = !empty($input['collection_id']) ? intval($input['collection_id']) : null;
+        $original_price = !empty($input['original_price']) ? floatval($input['original_price']) : null;
+        $back_image = !empty($input['back_image']) ? trim($input['back_image']) : $image;
+        $description = isset($input['description']) ? trim($input['description']) : '';
+        $dimensions = !empty($input['dimensions']) ? trim($input['dimensions']) : 'W: 180cm x D: 90cm x H: 85cm';
+        $material = !empty($input['material']) ? trim($input['material']) : 'Solid Teak Wood & Velvet';
+        $rating = isset($input['rating']) ? floatval($input['rating']) : 4.5;
+        $reviews_count = isset($input['reviews_count']) ? intval($input['reviews_count']) : 0;
+        $has_offer = !empty($input['has_offer']) ? 1 : 0;
+        $offer_end_time = !empty($input['offer_end_time']) ? $input['offer_end_time'] : null;
+        $is_featured = !empty($input['is_featured']) ? 1 : 0;
+        $is_trending = !empty($input['is_trending']) ? 1 : 0;
+        $stock_status = !empty($input['stock_status']) ? trim($input['stock_status']) : 'In Stock';
+
+        $stmt = $pdo->prepare("INSERT INTO products (
+            category_id, collection_id, name, price, original_price, image, back_image,
+            description, dimensions, material, rating, reviews_count, has_offer,
+            offer_end_time, is_featured, is_trending, stock_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        $stmt->execute([
+            $category_id, $collection_id, $name, $price, $original_price, $image, $back_image,
+            $description, $dimensions, $material, $rating, $reviews_count, $has_offer,
+            $offer_end_time, $is_featured, $is_trending, $stock_status
+        ]);
+
+        $newId = (int)$pdo->lastInsertId();
+
+        // Fetch inserted product details with category and collection details
+        $fetchStmt = $pdo->prepare("SELECT p.*, c.name as category_name, c.slug as category_slug, col.title as collection_title, col.slug as collection_slug 
+                                    FROM products p 
+                                    LEFT JOIN categories c ON p.category_id = c.id 
+                                    LEFT JOIN collections col ON p.collection_id = col.id 
+                                    WHERE p.id = ?");
+        $fetchStmt->execute([$newId]);
+        $newProduct = $fetchStmt->fetch();
+
+        http_response_code(201);
+        echo json_encode([
+            "status" => "success",
+            "message" => "Product stored successfully in database",
+            "data" => $newProduct
+        ]);
+
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode(["status" => "error", "message" => "Failed to store product: " . $e->getMessage()]);
+    }
+} else if ($method === 'DELETE') {
+    try {
+        $input = json_decode(file_get_contents('php://input'), true);
+        $id = isset($_GET['id']) ? intval($_GET['id']) : (isset($input['id']) ? intval($input['id']) : null);
+
+        if (!$id) {
+            http_response_code(400);
+            echo json_encode(["status" => "error", "message" => "Product ID required for deletion"]);
+            exit();
+        }
+
+        $stmt = $pdo->prepare("DELETE FROM products WHERE id = ?");
+        $stmt->execute([$id]);
+
+        echo json_encode(["status" => "success", "message" => "Product deleted successfully from database"]);
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode(["status" => "error", "message" => "Failed to delete product: " . $e->getMessage()]);
+    }
 } else {
     http_response_code(405);
     echo json_encode(["status" => "error", "message" => "Method not allowed"]);
 }
+
