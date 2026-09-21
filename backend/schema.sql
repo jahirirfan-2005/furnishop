@@ -130,7 +130,7 @@ INSERT IGNORE INTO products
  image, back_image, description, dimensions, material, color, rating, reviews_count,
  has_offer, is_featured, is_trending, stock_status) VALUES
 (1, 1, 1, 'Nordic Minimalist Oak Armchair', 'nordic-minimalist-oak-armchair', 14999.00, 19999.00, 14999.00, 25,
- 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=800&q=80', 'https://images.unsplash.com/photo-1580481072645-022f9a6d1276?auto=format&fit=crop&w=800&q=80',
+ 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=800&q=80', 'https://images.unsplash.com/photo-1519710164239-da123dc03ef4?auto=format&fit=crop&w=800&q=80',
  'Handcrafted white oak armchair with soft linen upholstery and ergonomic lumbar angle.',
  'W: 75cm x D: 80cm x H: 85cm', 'Solid White Oak & Organic Linen', 'Natural Oak White', 4.8, 42, 1, 1, 1, 'In Stock'),
 (2, 1, 2, 'Royal Emerald Velvet 3-Seater Sofa', 'royal-emerald-velvet-3-seater-sofa', 49999.00, 64999.00, 49999.00, 15,
@@ -138,7 +138,7 @@ INSERT IGNORE INTO products
  'Deep tufted emerald green velvet sofa featuring brushed gold metal legs.',
  'W: 220cm x D: 95cm x H: 88cm', 'Plush Royal Velvet & Gold Brass Base', 'Emerald Green', 4.9, 88, 1, 1, 1, 'In Stock'),
 (3, 2, 5, 'Aura Hydraulic Storage Platform Bed', 'aura-hydraulic-storage-platform-bed', 38999.00, 49999.00, 38999.00, 12,
- 'https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&w=800&q=80', 'https://images.unsplash.com/photo-1540518614846-7ede433c5163?auto=format&fit=crop&w=800&q=80',
+ 'https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&w=800&q=80', 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?auto=format&fit=crop&w=800&q=80',
  'Queen size hydraulic bed with padded headboard and massive under-bed storage compartment.',
  'W: 160cm x L: 205cm x H: 110cm', 'Solid Teak & Premium Microfiber', 'Walnut Brown', 4.7, 36, 1, 1, 0, 'In Stock'),
 (4, 3, 6, 'Carrara Italian Marble 6-Seater Dining Set', 'carrara-italian-marble-6-seater-dining-set', 68999.00, 84999.00, 68999.00, 8,
