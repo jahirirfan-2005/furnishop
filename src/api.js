@@ -1,5 +1,113 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/backend/api";
-const API_ORIGIN = new URL(API_BASE).origin;
+import { toast } from "react-toastify";
+
+// One central API configuration.
+// - Set VITE_API_BASE_URL (furniture/.env.local) when the PHP API lives on a
+//   different origin (local dev: http://127.0.0.1:8001/backend/api).
+// - With no env var, the app calls the SAME ORIGIN /backend/api - correct on
+//   any PHP host, and on static hosting (Vercel) requests fail fast and the
+//   built-in catalog snapshot takes over so products and images always show.
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  `${window.location.origin}/backend/api`;
+const API_ORIGIN = new URL(API_BASE, window.location.origin).origin;
+
+// Static snapshot of the MySQL catalog, exported by backend/export_fallback.php.
+// Used ONLY when the PHP API is unreachable (e.g. the static Vercel deployment)
+// so visitors always see products and images. MySQL stays the source of truth.
+import PRODUCTS_FALLBACK from "./products_fallback.json";
+
+/**
+ * Mirror of the PHP API's filtering/sorting (api/products.php) so the static
+ * fallback behaves identically to the live database-backed endpoint.
+ */
+const filterFallbackProducts = (params = {}) => {
+  const {
+    category,
+    collection,
+    search,
+    sort,
+    featured,
+    trending,
+    offers,
+    in_stock_only,
+    min_price,
+    max_price,
+  } = params;
+
+  let list = PRODUCTS_FALLBACK.filter((p) => p.status !== "inactive");
+
+  if (category && category !== "all") {
+    if (/^\d+$/.test(String(category))) {
+      list = list.filter((p) => p.category_id === Number(category));
+    } else {
+      list = list.filter(
+        (p) => p.category_slug === category || p.category_name === category
+      );
+    }
+  }
+  if (collection && collection !== "all") {
+    list = list.filter(
+      (p) =>
+        p.collection_slug === collection ||
+        String(p.collection_id) === String(collection)
+    );
+  }
+  if (search && String(search).trim() !== "") {
+    const q = String(search).trim().toLowerCase();
+    list = list.filter((p) =>
+      [p.name, p.description, p.material, p.color, p.category_name, p.slug]
+        .some((v) => v && String(v).toLowerCase().includes(q))
+    );
+  }
+  if (featured)    list = list.filter((p) => p.is_featured === 1);
+  if (trending)    list = list.filter((p) => p.is_trending === 1);
+  if (offers)      list = list.filter((p) => p.has_offer === 1);
+  if (in_stock_only) list = list.filter((p) => p.in_stock);
+  if (min_price !== undefined && min_price !== "" && !isNaN(Number(min_price))) {
+    list = list.filter((p) => Number(p.price) >= Number(min_price));
+  }
+  if (max_price !== undefined && max_price !== "" && !isNaN(Number(max_price))) {
+    list = list.filter((p) => Number(p.price) <= Number(max_price));
+  }
+
+  const byNum = (a, b, key) => Number(a[key] ?? 0) - Number(b[key] ?? 0);
+  const sorted = [...list];
+  switch (sort) {
+    case "price_low":  sorted.sort((a, b) => byNum(a, b, "price")); break;
+    case "price_high": sorted.sort((a, b) => byNum(b, a, "price")); break;
+    case "rating":
+      sorted.sort((a, b) => byNum(b, a, "rating") || byNum(b, a, "reviews_count"));
+      break;
+    case "newest":
+      sorted.sort(
+        (a, b) =>
+          String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")) ||
+          byNum(b, a, "id")
+      );
+      break;
+    case "offers":
+      sorted.sort((a, b) => byNum(b, a, "has_offer") || byNum(a, b, "price"));
+      break;
+    case "name":
+      sorted.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      break;
+    case "featured":
+    default:
+      sorted.sort((a, b) => byNum(b, a, "is_featured") || byNum(a, b, "id"));
+      break;
+  }
+  return sorted;
+};
+
+// Toast-guidance is shown at most once per page load.
+let fallbackNoticeShown = false;
+const fallbackResponse = (message) => ({
+  status: "success",
+  success: true,
+  fallback: true,
+  message,
+  data: [],
+});
 
 /**
  * Resolve a product image reference to a full URL.
@@ -70,55 +178,101 @@ export const api = {
     try {
       const query = new URLSearchParams(params).toString();
       const res = await fetch(`${API_BASE}/products.php?${query}`);
-      return await handleResponse(res, "Failed to load products");
+      const data = await handleResponse(res, "Failed to load products");
+      // Guard: any unexpected response shape falls back to the snapshot.
+      if (!data || data.status !== "success" || !Array.isArray(data.data)) {
+        throw new Error("Unexpected products response");
+      }
+      return data;
     } catch {
-      console.warn("Product API unreachable - products come from the database");
-      return { status: "error", success: false, message: "Cannot reach product API", data: [] };
+      // PHP API unreachable (e.g. static hosting) - serve the catalog snapshot.
+      console.warn("Product API unreachable - serving static catalog snapshot");
+      const data = filterFallbackProducts(params);
+      const resp = fallbackResponse("Showing the offline catalog (product API not reachable)");
+      resp.data = data;
+      resp.count = data.length;
+      if (!fallbackNoticeShown && typeof window !== "undefined") {
+        fallbackNoticeShown = true;
+        // Small delay so the ToastContainer has definitely mounted.
+        setTimeout(() => toast.info(resp.message, { autoClose: 6000 }), 800);
+      }
+      return resp;
     }
   },
 
   async getProduct(id) {
     try {
       const res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`);
-      return await handleResponse(res, "Failed to load product");
+      const data = await handleResponse(res, "Failed to load product");
+      if (!data || data.status !== "success" || !data.data || typeof data.data !== "object") {
+        throw new Error("Unexpected product response");
+      }
+      return data;
     } catch {
-      console.warn("Product detail API unreachable");
-      return { status: "error", success: false, message: "Cannot reach product API", data: null };
+      console.warn("Product detail API unreachable - using snapshot");
+      const product = PRODUCTS_FALLBACK.find((p) => String(p.id) === String(id));
+      if (!product) {
+        return { status: "error", success: false, message: "Product not found", data: null };
+      }
+      return { status: "success", success: true, fallback: true, message: "Product fetched", data: product };
     }
   },
 
   async getProductBySlug(slug) {
     try {
       const res = await fetch(`${API_BASE}/products.php?slug=${encodeURIComponent(slug)}`);
-      return await handleResponse(res, "Failed to load product");
+      const data = await handleResponse(res, "Failed to load product");
+      if (!data || data.status !== "success" || !data.data || typeof data.data !== "object") {
+        throw new Error("Unexpected product response");
+      }
+      return data;
     } catch {
-      console.warn("Product slug API unreachable");
-      return { status: "error", success: false, message: "Cannot reach product API", data: null };
+      console.warn("Product slug API unreachable - using snapshot");
+      const product = PRODUCTS_FALLBACK.find((p) => p.slug === slug);
+      if (!product) {
+        return { status: "error", success: false, message: "Product not found", data: null };
+      }
+      return { status: "success", success: true, fallback: true, message: "Product fetched", data: product };
     }
   },
 
   async createProduct(productData) {
-    const res = await fetch(`${API_BASE}/products.php`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(productData)
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/products.php`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(productData)
+      });
+    } catch {
+      throw new Error("Products cannot be saved: this site is in read-only mode (no PHP/MySQL backend attached)");
+    }
     return await handleResponse(res, "Failed to store product");
   },
 
   async updateProduct(id, productData) {
-    const res = await fetch(`${API_BASE}/products.php`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...productData })
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/products.php`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...productData })
+      });
+    } catch {
+      throw new Error("Products cannot be updated: this site is in read-only mode (no PHP/MySQL backend attached)");
+    }
     return await handleResponse(res, "Failed to update product");
   },
 
   async deleteProduct(id) {
-    const res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`, {
-      method: "DELETE"
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+    } catch {
+      throw new Error("Products cannot be deleted: this site is in read-only mode (no PHP/MySQL backend attached)");
+    }
     return await handleResponse(res, "Failed to delete product");
   },
 
@@ -165,8 +319,19 @@ export const api = {
       const res = await fetch(`${API_BASE}/cart.php?session_id=${this.sessionId}`);
       return await handleResponse(res, "Network error");
     } catch {
+      // Offline/static hosting - hydrate cart items from the catalog snapshot
+      // so the drawer can show name, image and price exactly like the API does.
       const cart = getLocalCart();
-      return { status: "success", data: cart.map((c) => ({ ...c, offline: true })), subtotal: 0 };
+      const data = cart
+        .map((c) => {
+          const product = PRODUCTS_FALLBACK.find(
+            (p) => String(p.id) === String(c.product_id)
+          );
+          return product ? { ...product, quantity: c.quantity, offline: true } : null;
+        })
+        .filter(Boolean);
+      const subtotal = data.reduce((acc, item) => acc + item.price * item.quantity, 0);
+      return { status: "success", data, subtotal };
     }
   },
 
@@ -230,7 +395,14 @@ export const api = {
       const res = await fetch(`${API_BASE}/wishlist.php?session_id=${this.sessionId}`);
       return await handleResponse(res, "Network error");
     } catch {
-      return { status: "success", data: [] };
+      // Offline/static hosting - hydrate wishlist items from the catalog snapshot.
+      const wl = getLocalWishlist();
+      return {
+        status: "success",
+        data: wl
+          .map((id) => PRODUCTS_FALLBACK.find((p) => String(p.id) === String(id)))
+          .filter(Boolean),
+      };
     }
   },
 
@@ -294,7 +466,29 @@ export const api = {
 
       return data;
     } catch (err) {
-      return { status: "error", success: false, message: err.message || "Checkout failed" };
+      // Static hosting (or server down): keep the order in the browser so the
+      // customer keeps a record, and surface a clear message.
+      const local = {
+        id: Date.now(),
+        order_number: "LOCAL-" + Date.now().toString(36).toUpperCase(),
+        customer_name: orderData.customer_name,
+        total_amount: (orderData.items || []).reduce((acc, i) => acc + i.price * i.quantity, 0),
+        status: "Stored on device",
+        created_at: new Date().toISOString().replace("T", " ").substring(0, 19),
+        items: (orderData.items || []).map((i) => ({ id: i.id, product_id: i.id, product_name: i.name, product_image: i.image, quantity: i.quantity, price: i.price })),
+      };
+      const localOrders = JSON.parse(localStorage.getItem("furni_local_orders") || "[]");
+      localStorage.setItem("furni_local_orders", JSON.stringify([local, ...localOrders]));
+
+      return {
+        status: "error",
+        success: false,
+        message:
+          err.message === "Failed to fetch"
+            ? "Order saved on this device only - the store backend is not connected (static hosting). Use a PHP host for live orders."
+            : err.message || "Checkout failed",
+        order: local,
+      };
     }
   },
 

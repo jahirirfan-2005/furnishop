@@ -41,6 +41,30 @@ React frontend  →  PHP REST API (PDO, prepared statements)  →  MySQL (single
    npm run dev
    ```
    The API base URL lives in one place: `VITE_API_BASE_URL` in `furniture/.env.local`
+
+## Static hosting (Vercel / Netlify)
+
+Vercel and Netlify serve **static files only — there is no PHP or MySQL there**.
+The production build handles this gracefully:
+
+1. It first tries the same-origin `/backend/api` (so it works unchanged on any
+   PHP host).
+2. When that is unavailable (static hosting), it automatically serves a bundled
+   **catalog snapshot** — products, prices, images and search keep working
+   (read-only: cart/wishlist run in browser storage; checkout explains that the
+   backend is not connected).
+
+To refresh the snapshot after changing products via the admin panel:
+
+```bash
+php backend/export_fallback.php   # regenerates src/products_fallback.json
+# then commit & push - Vercel redeploys automatically
+```
+
+MySQL stays the single source of truth; the snapshot is only a fallback.
+For a **fully live** deployed store (admin edits, real orders), host the
+`backend/` folder on any PHP+MySQL host and set `VITE_API_BASE_URL` to that
+host's API URL before building.
    (default `http://127.0.0.1:8001/backend/api`). Change it once for deployment.
 
 ## API overview
