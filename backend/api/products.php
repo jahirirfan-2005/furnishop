@@ -21,13 +21,11 @@
 require_once __DIR__ . '/config.php';
 /** @var PDO $pdo */
 
-ensure_product_schema($pdo);
-
 $method = $_SERVER['REQUEST_METHOD'];
 
 try {
     // =====================================================================
-    // GET - list / search / single product
+    // GET - list / search / single product (Public with admin overrides)
     // =====================================================================
     if ($method === 'GET') {
         $baseSelect = "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
@@ -36,12 +34,14 @@ try {
                        LEFT JOIN categories c ON c.id = p.category_id
                        LEFT JOIN collections col ON col.id = p.collection_id";
 
+        $adminUser = get_authenticated_admin($pdo);
+
         // ---------- Single product by id ----------
         if (!empty($_GET['id'])) {
             $stmt = $pdo->prepare("$baseSelect WHERE p.id = :id LIMIT 1");
             $stmt->execute([':id' => (int)$_GET['id']]);
             $row = $stmt->fetch();
-            if (!$row) {
+            if (!$row || (!$adminUser && $row['status'] !== 'active')) {
                 api_error('Product not found', 404);
             }
             api_success(cast_product($row), 'Product fetched');
@@ -52,7 +52,7 @@ try {
             $stmt = $pdo->prepare("$baseSelect WHERE p.slug = :slug LIMIT 1");
             $stmt->execute([':slug' => trim($_GET['slug'])]);
             $row = $stmt->fetch();
-            if (!$row) {
+            if (!$row || (!$adminUser && $row['status'] !== 'active')) {
                 api_error('Product not found', 404);
             }
             api_success(cast_product($row), 'Product fetched');
@@ -62,11 +62,15 @@ try {
         $where  = [];
         $params = [];
 
-        // Storefront never sees inactive products unless explicitly asked (admin).
-        if (empty($_GET['include_inactive'])) {
+        // Storefront never sees inactive products unless caller is authenticated admin.
+        $adminUser = get_authenticated_admin($pdo);
+        if ($adminUser && !empty($_GET['include_inactive'])) {
+            if ($_GET['include_inactive'] === 'inactive') {
+                $where[] = "p.status = 'inactive'";
+            }
+            // if include_inactive = 1, show both active & inactive
+        } else {
             $where[] = "p.status = 'active'";
-        } elseif (($_GET['include_inactive'] ?? '') === 'inactive') {
-            $where[] = "p.status = 'inactive'";
         }
 
         if (!empty($_GET['category']) && $_GET['category'] !== 'all') {
@@ -184,6 +188,7 @@ try {
     // POST - create product (admin)
     // =====================================================================
     if ($method === 'POST') {
+        require_admin_auth($pdo);
         $d = request_data();
 
         // Required fields.
@@ -191,12 +196,33 @@ try {
         $price = $d['price'] ?? null;
         $image = trim($d['image'] ?? '');
 
-        if ($name === '')          api_error('Product name is required', 422);
+        if ($name === '')           api_error('Product name is required', 422);
+        if (mb_strlen($name) < 2)   api_error('Product name must be at least 2 characters', 422);
+        if (mb_strlen($name) > 255) api_error('Product name is too long (max 255 characters)', 422);
+
         if ($price === null || !is_numeric($price) || (float)$price <= 0) {
             api_error('A valid price greater than 0 is required', 422);
         }
-        if ($image === '')         api_error('A product image is required', 422);
-        if (mb_strlen($name) > 255) api_error('Product name is too long (max 255 characters)', 422);
+
+        if (isset($d['stock_quantity']) && (!is_numeric($d['stock_quantity']) || (int)$d['stock_quantity'] < 0)) {
+            api_error('Stock quantity cannot be negative', 422);
+        }
+
+        $stockQty = isset($d['stock_quantity']) && is_numeric($d['stock_quantity']) ? max(0, (int)$d['stock_quantity']) : 25;
+
+        $originalPrice = !empty($d['original_price']) && is_numeric($d['original_price']) ? (float)$d['original_price'] : null;
+        $discountPrice = isset($d['discount_price']) && $d['discount_price'] !== '' && is_numeric($d['discount_price'])
+            ? (float)$d['discount_price'] : null;
+
+        if ($discountPrice !== null) {
+            if ($discountPrice <= 0) api_error('Discount price must be greater than 0', 422);
+            if ($discountPrice > (float)$price) api_error('Discount price cannot exceed regular price', 422);
+        }
+        if ($originalPrice !== null && $originalPrice < (float)$price) {
+            api_error('Original price cannot be less than regular price', 422);
+        }
+
+        if ($image === '') api_error('A product image is required', 422);
 
         // Optional / derived fields.
         $categoryTable = "categories";
@@ -210,12 +236,11 @@ try {
         }
 
         $collectionId = !empty($d['collection_id']) ? (int)$d['collection_id'] : null;
-
-        $originalPrice = !empty($d['original_price']) && is_numeric($d['original_price']) ? (float)$d['original_price'] : null;
-        $discountPrice = isset($d['discount_price']) && $d['discount_price'] !== '' && is_numeric($d['discount_price'])
-            ? (float)$d['discount_price'] : null;
-
-        $stockQty = isset($d['stock_quantity']) && is_numeric($d['stock_quantity']) ? max(0, (int)$d['stock_quantity']) : 25;
+        if ($collectionId !== null) {
+            $colChk = $pdo->prepare("SELECT id FROM collections WHERE id = :id");
+            $colChk->execute([':id' => $collectionId]);
+            if (!$colChk->fetch()) api_error('Selected collection does not exist', 422);
+        }
 
         // Additional images: accept an array or comma-separated string; store as JSON.
         $additional = $d['additional_images'] ?? [];
@@ -301,6 +326,7 @@ try {
     // PUT - update product (admin). Accepts full form or single-field patch.
     // =====================================================================
     if ($method === 'PUT') {
+        require_admin_auth($pdo);
         $d = request_data();
         $id = (int)($d['id'] ?? 0);
         if (!$id) api_error('Product id is required', 400);
@@ -324,8 +350,32 @@ try {
 
             // Field-level validation.
             if ($col === 'name' && trim((string)$v) === '') api_error('Product name cannot be empty', 422);
-            if (in_array($col, ['price', 'discount_price'], true) && $v !== '' && $v !== null && (!is_numeric($v) || (float)$v < 0)) {
-                api_error("Invalid value for $col", 422);
+            if ($col === 'price' && (!is_numeric($v) || (float)$v <= 0)) {
+                api_error('Price must be greater than 0', 422);
+            }
+            if ($col === 'discount_price' && $v !== '' && $v !== null && (!is_numeric($v) || (float)$v <= 0)) {
+                api_error('Discount price must be greater than 0', 422);
+            }
+            if ($col === 'stock_quantity' && (!is_numeric($v) || (int)$v < 0)) {
+                api_error('Stock quantity cannot be negative', 422);
+            }
+            if ($col === 'category_id') {
+                $chk = $pdo->prepare("SELECT id FROM categories WHERE id = :cid");
+                $chk->execute([':cid' => (int)$v]);
+                if (!$chk->fetch()) api_error('Selected category does not exist', 422);
+            }
+            if ($col === 'collection_id' && $v !== '' && $v !== null) {
+                $chk = $pdo->prepare("SELECT id FROM collections WHERE id = :colid");
+                $chk->execute([':colid' => (int)$v]);
+                if (!$chk->fetch()) api_error('Selected collection does not exist', 422);
+            }
+            if ($col === 'slug') {
+                $slugVal = trim((string)$v);
+                if ($slugVal === '') api_error('Slug cannot be empty', 422);
+                $chk = $pdo->prepare("SELECT id FROM products WHERE slug = :s AND id != :id");
+                $chk->execute([':s' => $slugVal, ':id' => $id]);
+                if ($chk->fetch()) api_error('Slug is already in use by another product', 422);
+                $v = $slugVal;
             }
             if ($col === 'status' && !in_array($v, ['active', 'inactive'], true)) api_error('Invalid status', 422);
             if ($col === 'rating' && $v !== '' && $v !== null) {
@@ -378,6 +428,7 @@ try {
     // DELETE - remove product (admin)
     // =====================================================================
     if ($method === 'DELETE') {
+        require_admin_auth($pdo);
         $id = (int)($_GET['id'] ?? 0);
         if (!$id) {
             $d = request_data();

@@ -172,6 +172,20 @@ const handleResponse = async (res, fallbackMessage) => {
 export const api = {
   sessionId: getSessionId(),
 
+  getAdminToken() {
+    return localStorage.getItem("furni_admin_token") || "";
+  },
+
+  setAdminToken(token) {
+    if (token) localStorage.setItem("furni_admin_token", token);
+    else localStorage.removeItem("furni_admin_token");
+  },
+
+  authHeaders(extra = {}) {
+    const token = this.getAdminToken();
+    return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+  },
+
   /* ============================ PRODUCTS (MySQL) ============================ */
 
   async getProducts(params = {}) {
@@ -241,7 +255,7 @@ export const api = {
     try {
       res = await fetch(`${API_BASE}/products.php`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(productData)
       });
     } catch {
@@ -255,7 +269,7 @@ export const api = {
     try {
       res = await fetch(`${API_BASE}/products.php`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ id, ...productData })
       });
     } catch {
@@ -268,7 +282,8 @@ export const api = {
     let res;
     try {
       res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: this.authHeaders()
       });
     } catch {
       throw new Error("Products cannot be deleted: this site is in read-only mode (no PHP/MySQL backend attached)");
@@ -287,6 +302,7 @@ export const api = {
 
     const res = await fetch(`${API_BASE}/upload.php`, {
       method: "POST",
+      headers: this.authHeaders(),
       body: formData
     });
     return await handleResponse(res, "Image upload failed");
@@ -315,9 +331,17 @@ export const api = {
   /* ================================== CART ================================= */
 
   async getCart() {
+    // Normalize both API shapes: flat array (data: [...]) and
+    // nested object (data: { count, subtotal, items: [...] }).
+    const normalizeCartData = (d) => {
+      if (Array.isArray(d)) return d;
+      if (d && Array.isArray(d.items)) return d.items;
+      return [];
+    };
     try {
       const res = await fetch(`${API_BASE}/cart.php?session_id=${this.sessionId}`);
-      return await handleResponse(res, "Network error");
+      const payload = await handleResponse(res, "Network error");
+      return { ...payload, data: normalizeCartData(payload.data) };
     } catch {
       // Offline/static hosting - hydrate cart items from the catalog snapshot
       // so the drawer can show name, image and price exactly like the API does.
@@ -494,7 +518,9 @@ export const api = {
 
   async getOrders() {
     try {
-      const res = await fetch(`${API_BASE}/orders.php`);
+      const res = await fetch(`${API_BASE}/orders.php`, {
+        headers: this.authHeaders()
+      });
       return await handleResponse(res, "Network error");
     } catch {
       let localOrders = JSON.parse(localStorage.getItem("furni_local_orders") || "[]");
@@ -502,10 +528,15 @@ export const api = {
     }
   },
 
+  async trackOrder(orderNumber, email) {
+    const res = await fetch(`${API_BASE}/orders.php?order_number=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(email)}`);
+    return await handleResponse(res, "Failed to track order");
+  },
+
   async updateOrderStatus(orderId, status) {
     const res = await fetch(`${API_BASE}/orders.php`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: this.authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ id: orderId, status })
     });
     return await handleResponse(res, "Failed to update order status");
@@ -513,9 +544,65 @@ export const api = {
 
   async deleteOrder(orderId) {
     const res = await fetch(`${API_BASE}/orders.php?id=${encodeURIComponent(orderId)}`, {
-      method: "DELETE"
+      method: "DELETE",
+      headers: this.authHeaders()
     });
     return await handleResponse(res, "Failed to delete order");
+  },
+
+  /* ============================ AUTHENTICATION ============================== */
+
+  async getAuthStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/auth.php?action=status`, {
+        headers: this.authHeaders()
+      });
+      return await handleResponse(res, "Auth status failed");
+    } catch {
+      return { status: "success", data: { has_admin: true, is_logged_in: !!this.getAdminToken() } };
+    }
+  },
+
+  async adminLogin(usernameOrCreds, maybePassword) {
+    let username = usernameOrCreds;
+    let password = maybePassword;
+    if (typeof usernameOrCreds === "object" && usernameOrCreds !== null) {
+      username = usernameOrCreds.username;
+      password = usernameOrCreds.password;
+    }
+    const res = await fetch(`${API_BASE}/auth.php?action=login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await handleResponse(res, "Login failed");
+    if (data.status === "success" && data.data?.token) {
+      this.setAdminToken(data.data.token);
+    }
+    return data;
+  },
+
+  async adminLogout() {
+    try {
+      await fetch(`${API_BASE}/auth.php?action=logout`, {
+        method: "POST",
+        headers: this.authHeaders()
+      });
+    } finally {
+      this.setAdminToken(null);
+    }
+    return { status: "success", message: "Logged out" };
+  },
+
+  async getAdminProfile() {
+    const res = await fetch(`${API_BASE}/auth.php?action=me`, {
+      headers: this.authHeaders()
+    });
+    return await handleResponse(res, "Failed to get profile");
+  },
+
+  async checkAdminAuth() {
+    return await this.getAdminProfile();
   },
 
   /* ================================ NEWSLETTER ============================= */

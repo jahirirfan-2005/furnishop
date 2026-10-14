@@ -25,7 +25,11 @@ try {
     $stmt = $pdo->prepare("INSERT IGNORE INTO `$db`.newsletter_subscribers (email) VALUES (:email)");
     $stmt->execute([':email' => $email]);
 
-    echo json_encode(["status" => "success", "message" => "Thank you for subscribing!"]);
+    api_success(null, "Thank you for subscribing!");
 } catch (PDOException $e) {
-    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
+    error_log('[FurniShop Newsletter] PDOException: ' . $e->getMessage());
+    api_error("Newsletter subscription failed", 500);
+} catch (Throwable $e) {
+    error_log('[FurniShop Newsletter] Throwable: ' . $e->getMessage());
+    api_error("Newsletter subscription failed", 500);
 }

@@ -59,8 +59,12 @@ try {
         exit();
     }
 
-    json_out(["status" => "error", "message" => "Method not allowed"], 405);
+    api_error('Method not allowed', 405);
 
 } catch (PDOException $e) {
-    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
+    error_log('[FurniShop Wishlist] PDOException: ' . $e->getMessage());
+    api_error('Wishlist operation failed', 500);
+} catch (Throwable $e) {
+    error_log('[FurniShop Wishlist] Throwable: ' . $e->getMessage());
+    api_error('Wishlist operation failed', 500);
 }

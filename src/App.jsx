@@ -7,7 +7,7 @@ import CartDrawer from "./CartDrawer";
 import CheckoutModal from "./CheckoutModal";
 import WishlistModal from "./WishlistModal";
 import AddProductModal from "./AddProductModal";
-import AdminPanelModal from "./AdminPanelModal";
+import AdminPage from "./AdminPage";
 import Footer from "./Footer";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -21,6 +21,33 @@ function App() {
   const [cartItems, setCartItems] = useState([]);
   const [wishlistItems, setWishlistItems] = useState([]);
 
+  // Page Routing: 'store' | 'admin'
+  const [currentPage, setCurrentPage] = useState(() => {
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    return path === "/admin" || path.startsWith("/admin/") || hash === "#admin" ? "admin" : "store";
+  });
+
+  const navigateTo = (page) => {
+    setCurrentPage(page);
+    const targetUrl = page === "admin" ? "/admin" : "/";
+    if (window.location.pathname !== targetUrl) {
+      window.history.pushState({ page }, "", targetUrl);
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      const isAdm = path === "/admin" || path.startsWith("/admin/") || hash === "#admin";
+      setCurrentPage(isAdm ? "admin" : "store");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
   const [activeCollection, setActiveCollection] = useState("all");
@@ -32,7 +59,6 @@ function App() {
   const [isWishlistOpen, setIsWishlistOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [quickViewProduct, setQuickViewProduct] = useState(null);
 
@@ -132,7 +158,6 @@ function App() {
   /** Open the product form pre-filled for editing. */
   const handleEditProduct = (product) => {
     setEditingProduct(product);
-    setIsAdminPanelOpen(false);
     setIsAddProductOpen(true);
   };
 
@@ -229,57 +254,89 @@ function App() {
 
   return (
     <div className={`app-wrapper ${theme === "dark" ? "dark" : "light"}`}>
-      {/* Navbar */}
-      <Navbar
-        cartCount={totalCartCount}
-        wishlistCount={wishlistItems.length}
-        onOpenCart={() => setIsCartOpen(true)}
-        onOpenWishlist={() => setIsWishlistOpen(true)}
-        onOpenAddProduct={handleOpenAddProduct}
-        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        activeCategory={activeCategory}
-        setActiveCategory={setActiveCategory}
-        categories={categories}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
+      {currentPage === "admin" ? (
+        <AdminPage
+          onBackToStore={() => navigateTo("store")}
+          onOpenAddProduct={handleOpenAddProduct}
+          onEditProduct={handleEditProduct}
+          onProductDeleted={handleProductDeleted}
+          theme={theme}
+        />
+      ) : (
+        <>
+          {/* Navbar */}
+          <Navbar
+            cartCount={totalCartCount}
+            wishlistCount={wishlistItems.length}
+            onOpenCart={() => setIsCartOpen(true)}
+            onOpenWishlist={() => setIsWishlistOpen(true)}
+            onOpenAddProduct={handleOpenAddProduct}
+            onOpenAdminPanel={() => navigateTo("admin")}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            activeCategory={activeCategory}
+            setActiveCategory={setActiveCategory}
+            categories={categories}
+            theme={theme}
+            toggleTheme={toggleTheme}
+          />
 
-      {/* Hero Banner */}
-      <HeroBanner
-        collections={collections}
-        onSelectCollection={(slug) => setActiveCollection(slug)}
-      />
+          {/* Hero Banner */}
+          <HeroBanner
+            collections={collections}
+            onSelectCollection={(slug) => setActiveCollection(slug)}
+          />
 
-      {/* Product List & Filter Grid */}
-      <ProductList
-        products={products}
-        loading={loading}
-        categories={categories}
-        collections={collections}
-        activeCategory={activeCategory}
-        setActiveCategory={setActiveCategory}
-        activeCollection={activeCollection}
-        setActiveCollection={setActiveCollection}
-        sortBy={sortBy}
-        setSortBy={setSortBy}
-        searchTerm={searchTerm}
-        setSearchTerm={setSearchTerm}
-        handleAddToCart={handleAddToCart}
-        handleWishlist={handleWishlist}
-        wishlistItems={wishlistItems}
-        onQuickView={(product) => setQuickViewProduct(product)}
-      />
+          {/* Product List & Filter Grid */}
+          <ProductList
+            products={products}
+            loading={loading}
+            categories={categories}
+            collections={collections}
+            activeCategory={activeCategory}
+            setActiveCategory={setActiveCategory}
+            activeCollection={activeCollection}
+            setActiveCollection={setActiveCollection}
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            handleAddToCart={handleAddToCart}
+            handleWishlist={handleWishlist}
+            wishlistItems={wishlistItems}
+            onQuickView={(product) => setQuickViewProduct(product)}
+          />
 
-      {/* Footer */}
-      <Footer
-        categories={categories}
-        onSelectCategory={(slug) => {
-          setActiveCategory(slug);
-          window.scrollTo({ top: 500, behavior: "smooth" });
-        }}
-      />
+          {/* Footer */}
+          <Footer
+            categories={categories}
+            onSelectCategory={(slug) => {
+              setActiveCategory(slug);
+              window.scrollTo({ top: 500, behavior: "smooth" });
+            }}
+          />
+
+          {/* Mobile Sticky Bottom Quick Bar */}
+          <div className="mobile-bottom-nav">
+            <button
+              className={activeCategory === "all" ? "active" : ""}
+              onClick={() => {
+                setActiveCategory("all");
+                setActiveCollection("all");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            >
+              <span>🏠</span> Home
+            </button>
+            <button onClick={() => setIsWishlistOpen(true)}>
+              <span>❤️</span> Wishlist ({wishlistItems.length})
+            </button>
+            <button onClick={() => setIsCartOpen(true)} className="cart-quick-btn">
+              <span>🛒</span> Cart ({totalCartCount})
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Modals & Slide-out Drawers */}
       <QuickViewModal
@@ -331,35 +388,6 @@ function App() {
         editingProduct={editingProduct}
         onProductSaved={handleProductSaved}
       />
-
-      <AdminPanelModal
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
-        onOpenAddProduct={handleOpenAddProduct}
-        onEditProduct={handleEditProduct}
-        onProductDeleted={handleProductDeleted}
-        theme={theme}
-      />
-
-      {/* Mobile Sticky Bottom Quick Bar */}
-      <div className="mobile-bottom-nav">
-        <button
-          className={activeCategory === "all" ? "active" : ""}
-          onClick={() => {
-            setActiveCategory("all");
-            setActiveCollection("all");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        >
-          <span>🏠</span> Home
-        </button>
-        <button onClick={() => setIsWishlistOpen(true)}>
-          <span>❤️</span> Wishlist ({wishlistItems.length})
-        </button>
-        <button onClick={() => setIsCartOpen(true)} className="cart-quick-btn">
-          <span>🛒</span> Cart ({totalCartCount})
-        </button>
-      </div>
 
       <ToastContainer position="top-right" autoClose={2000} theme={theme === "dark" ? "dark" : "colored"} />
     </div>

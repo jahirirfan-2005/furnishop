@@ -1,12 +1,11 @@
 import React, { useState } from "react";
-import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge, FaPlus, FaUserShield } from "react-icons/fa";
+import { FaShoppingCart, FaHeart, FaSearch, FaMoon, FaSun, FaBars, FaTimes, FaThLarge, FaUserShield } from "react-icons/fa";
 
 function Navbar({ 
   cartCount, 
   wishlistCount, 
   onOpenCart, 
   onOpenWishlist, 
-  onOpenAddProduct,
   onOpenAdminPanel,
   searchTerm, 
   setSearchTerm,
@@ -99,12 +98,6 @@ function Navbar({
 
         {/* Navigation Action Icons */}
         <div className="nav-actions">
-          {/* Add Product Button */}
-          <button className="add-product-nav-btn" onClick={onOpenAddProduct} title="Store New Product">
-            <FaPlus className="add-icon" />
-            <span>Store Product</span>
-          </button>
-
           {/* Admin Panel Button */}
           <button className="admin-nav-btn" onClick={onOpenAdminPanel} title="Open Database Admin Panel">
             <FaUserShield className="admin-icon" />
@@ -201,6 +194,15 @@ function Navbar({
                   <span className="cat-count">({cat.product_count})</span>
                 </li>
               ))}
+              <li
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAdminPanel();
+                }}
+                style={{ cursor: "pointer", borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: "8px", paddingTop: "12px", color: "#38bdf8" }}
+              >
+                <span><FaUserShield /> Executive Admin</span>
+              </li>
             </ul>
           </div>
         </div>

@@ -223,6 +223,13 @@ function AdminPanelModal({ isOpen, onClose, onOpenAddProduct, onEditProduct, onP
             </div>
           </div>
           <div className="admin-header-actions">
+            <button
+              className="btn-primary add-prod-btn"
+              onClick={onOpenAddProduct}
+              title="Store a new product in the database"
+            >
+              <FaPlus /> Store Product
+            </button>
             <button className="icon-btn refresh-btn" onClick={fetchAdminData} title="Refresh Database Records">
               <FaSync className={loading ? "spin" : ""} />
             </button>

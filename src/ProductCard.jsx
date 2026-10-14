@@ -53,14 +53,10 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
             <div className="discount-tag">-{discountPercent}%</div>
           )}
 
-          {/* Offer Countdown Badge */}
-          {item.has_offer && (
+          {/* Offer Countdown Badge (only shown when offer is active and has remaining time) */}
+          {Boolean(item.has_offer && timeLeft > 0) && (
             <div className="offer-badge">
-              {timeLeft > 0 ? (
-                <span>⏳ {formatTime(timeLeft)}</span>
-              ) : (
-                <span className="expired">❌ Offer Ended</span>
-              )}
+              <span>⏳ {formatTime(timeLeft)}</span>
             </div>
           )}
 

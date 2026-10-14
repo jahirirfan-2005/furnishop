@@ -85,12 +85,18 @@ try {
     $pdo->commit();
 
     echo json_encode([
-        "status"       => "success",
-        "order_number" => $orderNumber,
-        "total_amount" => $total,
-        "message"      => "Order placed successfully and stored in database",
+        "status"        => "success",
+        "order_number"  => $orderNumber,
+        "customer_name" => trim($d['customer_name']),
+        "total_amount"  => $total,
+        "message"       => "Order placed successfully and stored in database",
     ]);
 } catch (PDOException $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
-    json_out(["status" => "error", "message" => "Database error", "error" => $e->getMessage()], 500);
+    error_log('[FurniShop Checkout] PDOException: ' . $e->getMessage());
+    api_error('Failed to process checkout transaction', 500);
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    error_log('[FurniShop Checkout] Throwable: ' . $e->getMessage());
+    api_error('Failed to process checkout transaction', 500);
 }

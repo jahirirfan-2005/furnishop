@@ -1,27 +1,25 @@
 <?php
 /**
- * Product image upload endpoint (admin).
+ * Product Image Upload Endpoint.
  *
- * POST multipart/form-data with one or more "image" (or "image[]") file fields.
- * Multiple files are stored in the order received, so the response `paths`
- * array maps 1:1 to the order of files sent.
- *
- * Rules:
- *   - Only JPG, JPEG, PNG and WEBP are allowed (checked by extension, MIME and
- *     real image content via getimagesize).
- *   - Max size 5 MB per file.
- *   - Executable content is rejected; PHP files cannot pass the extension or
- *     content checks, and uploads are served as static files only.
- *   - Stored under backend/uploads/products/ with a safe unique filename.
- *
- * Response: { status: "success", success: true, data: { urls: [...], paths: [...] } }
+ * Security:
+ * - Requires administrator authentication (Bearer token or session).
+ * - Enforces strict file extension whitelist (jpg, jpeg, png, webp).
+ * - Rejects multiple extensions, double dots, or directory traversal attempts.
+ * - Inspects actual image headers with getimagesize() and fileinfo MIME verification.
+ * - Generates cryptographically randomized filenames; user names are never used in destination paths.
+ * - Caps files at 5 MB per image.
  */
 
 require_once __DIR__ . '/config.php';
+/** @var PDO $pdo */
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     api_error('Method not allowed', 405);
 }
+
+// 1. Enforce Administrator Authentication
+require_admin_auth($pdo);
 
 define('MAX_UPLOAD_BYTES', 5 * 1024 * 1024); // 5 MB
 $allowedExt  = ['jpg', 'jpeg', 'png', 'webp'];
@@ -30,17 +28,21 @@ $allowedMime = ['image/jpeg', 'image/png', 'image/webp'];
 $uploadDir = realpath(__DIR__ . '/../uploads/products');
 if ($uploadDir === false) {
     $target = __DIR__ . '/../uploads/products';
-    if (!mkdir($target, 0775, true)) {
+    if (!mkdir($target, 0755, true)) {
         api_error('Could not create upload directory', 500);
     }
     $uploadDir = realpath($target);
 }
 
-$results = [];
-$files = $_FILES['image'] ?? $_FILES['image[]'] ?? null;
+// Ensure .htaccess execution prevention file exists in uploads folder
+$htaccessFile = $uploadDir . DIRECTORY_SEPARATOR . '.htaccess';
+if (!file_exists($htaccessFile)) {
+    @file_put_contents($htaccessFile, "# Disable PHP execution in upload directory\n<FilesMatch \"\\.(php|phtml|phar|pl|py|jsp|asp|sh|cgi|bat|cmd)$\">\n    Deny from all\n</FilesMatch>\nphp_flag engine off\nOptions -ExecCGI -Indexes\n");
+}
 
-// Normalize the $_FILES structure for single or multiple uploads.
+$files = $_FILES['image'] ?? $_FILES['image[]'] ?? null;
 $entries = [];
+
 if (is_array($files['name'] ?? null)) {
     foreach ($files['name'] as $i => $n) {
         $entries[] = [
@@ -59,49 +61,65 @@ if (!$entries) {
     api_error('No file received. Send multipart/form-data with an "image" file field.', 422);
 }
 
+$results = [];
+
 foreach ($entries as $f) {
     if (!isset($f['error']) || $f['error'] !== UPLOAD_ERR_OK) {
         api_error(match ($f['error'] ?? -1) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File is too large (server limit)',
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File exceeds maximum upload limit',
             UPLOAD_ERR_NO_FILE => 'No file received',
-            default => 'File upload failed (code ' . ($f['error'] ?? '?') . ')',
+            default => 'File upload failed',
         }, 422);
     }
 
-    if ($f['size'] > MAX_UPLOAD_BYTES) {
-        api_error('Image is larger than 5 MB', 422);
+    if ($f['size'] > MAX_UPLOAD_BYTES || $f['size'] <= 0) {
+        api_error('Image must be between 1 byte and 5 MB in size', 422);
     }
 
-    $origName = $f['name'] ?? '';
+    $origName = basename($f['name'] ?? '');
+
+    // Prevent double extensions like file.php.jpg or file.phtml.png
+    if (preg_match('/\.(php\d?|phtml|phar|asp|aspx|jsp|exe|sh|bat|cmd|cgi|pl)\./i', $origName)) {
+        api_error('Suspicious or prohibited filename structure detected', 422);
+    }
+
     $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
     if (!in_array($ext, $allowedExt, true)) {
-        // Special case: reject anything that smells executable right away.
-        if (preg_match('/\.(php\d?|phtml|phar|asp|aspx|jsp|exe|sh|bat|cmd)$/i', $origName)) {
-            api_error('Executable files are not allowed', 422);
-        }
-        api_error('Invalid file type. Only JPG, JPEG, PNG and WEBP images are allowed', 422);
+        api_error('Invalid file extension. Only JPG, JPEG, PNG, and WEBP images are allowed.', 422);
     }
 
-    // Verify real image content (also rejects renamed scripts).
+    // Verify real image dimensions and content
     $info = @getimagesize($f['tmp_name']);
     if ($info === false || !in_array($info['mime'], $allowedMime, true)) {
-        api_error('File content is not a valid image', 422);
+        api_error('File content is not a valid image format.', 422);
     }
 
-    // Safe unique filename: slug prefix + timestamp + random, no user text.
-    $safeBase = strtolower(preg_replace("/[^a-zA-Z0-9]+/", '-', pathinfo($origName, PATHINFO_FILENAME)));
-    $safeBase = substr(trim($safeBase, '-'), 0, 40);
-    $filename = ($safeBase ?: 'product') . '-' . time() . '-' . bin2hex(random_bytes(4)) . '.' . $ext;
+    // Double-check MIME with FileInfo if available
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $realMime = finfo_file($finfo, $f['tmp_name']);
+        finfo_close($finfo);
+        if (!in_array($realMime, $allowedMime, true)) {
+            api_error('Image signature validation failed.', 422);
+        }
+    }
+
+    // Safe unique filename: purely random hex - no user-controlled path segments
+    $filename = 'product-' . time() . '-' . bin2hex(random_bytes(8)) . '.' . $ext;
     $dest = $uploadDir . DIRECTORY_SEPARATOR . $filename;
 
     if (!move_uploaded_file($f['tmp_name'], $dest)) {
-        api_error('Failed to save the uploaded image', 500);
+        error_log('[FurniShop Upload] move_uploaded_file failed for destination: ' . $dest);
+        api_error('Failed to save the uploaded image securely', 500);
     }
 
+    // Set safe permissions on saved image (read-only for group/others)
+    @chmod($dest, 0644);
+
     $results[] = [
-        'file'    => $filename,
-        'path'    => 'backend/uploads/products/' . $filename,
-        'url'     => '/backend/uploads/products/' . $filename,
+        'file' => $filename,
+        'path' => 'backend/uploads/products/' . $filename,
+        'url'  => '/backend/uploads/products/' . $filename,
     ];
 }
 

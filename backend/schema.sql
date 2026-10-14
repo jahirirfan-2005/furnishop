@@ -68,10 +68,22 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_email VARCHAR(150) NOT NULL,
   customer_phone VARCHAR(30) DEFAULT NULL,
   shipping_address TEXT NOT NULL,
+  shipping_city VARCHAR(100) DEFAULT NULL,
+  shipping_pincode VARCHAR(20) DEFAULT NULL,
   payment_method VARCHAR(50) DEFAULT 'Credit Card',
+  subtotal_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  shipping_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   status ENUM('Processing','Shipped','Delivered','Cancelled') NOT NULL DEFAULT 'Processing',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  payment_status ENUM('pending','paid','failed','refunded') NOT NULL DEFAULT 'pending',
+  idempotency_key VARCHAR(128) DEFAULT NULL UNIQUE,
+  session_id VARCHAR(80) DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_orders_customer_email (customer_email),
+  INDEX idx_orders_status (status),
+  INDEX idx_orders_payment_status (payment_status),
+  INDEX idx_orders_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -82,7 +94,9 @@ CREATE TABLE IF NOT EXISTS order_items (
   product_image VARCHAR(500) DEFAULT NULL,
   quantity INT NOT NULL DEFAULT 1,
   price DECIMAL(10,2) NOT NULL,
-  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+  subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  INDEX idx_order_items_product (product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS cart_items (
@@ -102,6 +116,42 @@ CREATE TABLE IF NOT EXISTS wishlist_items (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_wl_session_product (session_id, product_id),
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) NOT NULL UNIQUE,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'admin',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_login TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS admin_tokens (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NOT NULL,
+  token_hash CHAR(64) NOT NULL UNIQUE,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_token_hash (token_hash),
+  INDEX idx_expires (expires_at),
+  FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ip_address VARCHAR(45) NOT NULL,
+  username VARCHAR(100) NOT NULL,
+  attempt_time INT UNSIGNED NOT NULL,
+  success TINYINT(1) NOT NULL DEFAULT 0,
+  INDEX idx_ip_time (ip_address, attempt_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Seed categories
