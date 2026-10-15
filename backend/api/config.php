@@ -321,6 +321,12 @@ function cast_product(array $p): array
         $p['additional_images_arr'] = is_array($decoded) ? $decoded : [];
     }
 
+    $p['brand'] = $p['brand'] ?? 'FurniCraft';
+    $p['sku'] = $p['sku'] ?? ('FURNI-' . ($p['id'] ?? ''));
+    if (!isset($p['image_url']) && isset($p['image'])) {
+        $p['image_url'] = $p['image'];
+    }
+
     return $p;
 }
 

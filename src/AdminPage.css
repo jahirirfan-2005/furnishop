@@ -663,6 +663,42 @@
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stock-save-btn:hover {
+  background: #8b653b;
+  transform: translateY(-1px);
+}
+
+.price-input {
+  width: 82px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  outline: none;
+}
+
+.price-input:focus {
+  border-color: #b08d4f;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.admin-sku-tag {
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: #b08d4f;
+  background: rgba(176, 141, 79, 0.15);
+  border: 1px solid rgba(176, 141, 79, 0.35);
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 
 .action-btn-group {

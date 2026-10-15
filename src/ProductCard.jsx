@@ -2,8 +2,24 @@ import React, { useState, useEffect } from "react";
 import { FaShoppingCart, FaHeart, FaStar, FaEye, FaSyncAlt } from "react-icons/fa";
 import { resolveImageUrl } from "./api";
 
-const DEFAULT_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
-const BACK_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=800&q=80";
+// Bespoke luxury SVG placeholder for seamless fallback when network images are unavailable
+const DEFAULT_FALLBACK_IMAGE =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+      <rect width="800" height="600" fill="#f4ede2"/>
+      <g fill="none" stroke="#b08d4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
+        <path d="M280 440 L280 340 L520 340 L520 440"/>
+        <path d="M240 340 L560 340"/>
+        <path d="M280 340 C280 260 520 260 520 340"/>
+        <line x1="320" y1="440" x2="320" y2="400"/>
+        <line x1="480" y1="440" x2="480" y2="400"/>
+      </g>
+      <text x="400" y="490" font-family="'Cormorant Garamond', Georgia, serif" font-size="22" fill="#5c5144" text-anchor="middle" letter-spacing="2">FURNISHOP ATELIER</text>
+    </svg>`
+  );
+
+const BACK_FALLBACK_IMAGE = DEFAULT_FALLBACK_IMAGE;
 
 function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQuickView }) {
   const [flipped, setFlipped] = useState(false);
@@ -100,8 +116,9 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
           <div className="card-image-wrapper" onClick={() => onQuickView(item)}>
             <img
               src={resolveImageUrl(item.image)}
-              alt={item.name}
+              alt={`${item.name} - ${item.category_name || "Luxury Furniture"}`}
               loading="lazy"
+              decoding="async"
               onError={(e) => {
                 e.target.onerror = null;
                 e.target.src = DEFAULT_FALLBACK_IMAGE;
@@ -158,8 +175,9 @@ function ProductCard({ item, handleAddToCart, handleWishlist, isWishlisted, onQu
           <div className="card-back-image-wrapper" onClick={() => setFlipped(false)}>
             <img
               src={resolveImageUrl(item.back_image || item.backImage || item.image)}
-              alt={`${item.name} Detail`}
+              alt={`${item.name} - Specifications & Detail View`}
               loading="lazy"
+              decoding="async"
               onError={(e) => {
                 e.target.onerror = null;
                 e.target.src = BACK_FALLBACK_IMAGE;

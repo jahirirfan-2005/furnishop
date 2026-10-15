@@ -2,7 +2,21 @@ import React, { useState } from "react";
 import { FaTimes, FaStar, FaShoppingCart, FaHeart, FaCheck, FaTruck, FaShieldAlt, FaBolt, FaBoxOpen } from "react-icons/fa";
 import { resolveImageUrl } from "./api";
 
-const FALLBACK_IMG = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
+const FALLBACK_IMG =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+      <rect width="800" height="600" fill="#f4ede2"/>
+      <g fill="none" stroke="#b08d4f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6">
+        <path d="M280 440 L280 340 L520 340 L520 440"/>
+        <path d="M240 340 L560 340"/>
+        <path d="M280 340 C280 260 520 260 520 340"/>
+        <line x1="320" y1="440" x2="320" y2="400"/>
+        <line x1="480" y1="440" x2="480" y2="400"/>
+      </g>
+      <text x="400" y="490" font-family="'Cormorant Garamond', Georgia, serif" font-size="22" fill="#5c5144" text-anchor="middle" letter-spacing="2">FURNISHOP ATELIER</text>
+    </svg>`
+  );
 
 function QuickViewModal({ product, onClose, handleAddToCart, handleWishlist, isWishlisted, onBuyNow }) {
   // State is initialized from props; App.jsx remounts this modal with a `key`

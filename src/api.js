@@ -53,11 +53,11 @@ const filterFallbackProducts = (params = {}) => {
     );
   }
   if (search && String(search).trim() !== "") {
-    const q = String(search).trim().toLowerCase();
-    list = list.filter((p) =>
-      [p.name, p.description, p.material, p.color, p.category_name, p.slug]
-        .some((v) => v && String(v).toLowerCase().includes(q))
-    );
+    const terms = String(search).trim().toLowerCase().split(/\s+/).filter(Boolean);
+    list = list.filter((p) => {
+      const searchBlob = `${p.name || ""} ${p.brand || ""} ${p.sku || ""} ${p.category_name || ""} ${p.description || ""} ${p.material || ""} ${p.color || ""}`.toLowerCase();
+      return terms.every((t) => searchBlob.includes(t));
+    });
   }
   if (featured)    list = list.filter((p) => p.is_featured === 1);
   if (trending)    list = list.filter((p) => p.is_trending === 1);
@@ -136,13 +136,13 @@ const getSessionId = () => {
 // Small offline fallbacks for CATEGORIES / COLLECTIONS chrome only.
 // Products are NEVER hardcoded here - they come from MySQL via the PHP API.
 const FALLBACK_CATEGORIES = [
-  { id: 1, name: "Living Room", slug: "living-room", description: "Sofas, coffee tables & recliners", icon: "🛋️", image: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80" },
-  { id: 2, name: "Bedroom", slug: "bedroom", description: "Beds, nightstands & dressers", icon: "🛏️", image: "https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&w=800&q=80" },
-  { id: 3, name: "Dining Room", slug: "dining-room", description: "Dining tables & ergonomic chairs", icon: "🍽️", image: "https://images.unsplash.com/photo-1617806118233-18e1de247200?auto=format&fit=crop&w=800&q=80" },
-  { id: 4, name: "Office & Study", slug: "office-study", description: "Desks & executive chairs", icon: "💼", image: "https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=800&q=80" },
-  { id: 5, name: "Outdoor & Patio", slug: "outdoor-patio", description: "Teak lounges & patio sets", icon: "🪴", image: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80" },
-  { id: 6, name: "Luxury & Decor", slug: "luxury-decor", description: "Console tables & plush rugs", icon: "✨", image: "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?auto=format&fit=crop&w=800&q=80" },
-  { id: 7, name: "Lighting & Accents", slug: "lighting-accents", description: "Floor lamps & wall art", icon: "💡", image: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=800&q=80" }
+  { id: 1, name: "Living Room", slug: "living-room", description: "Sofas, coffee tables & recliners", icon: "🛋️", image: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80" },
+  { id: 2, name: "Bedroom", slug: "bedroom", description: "Beds, nightstands & dressers", icon: "🛏️", image: "https://images.unsplash.com/photo-1616594039964-ae9021a400a0?auto=format&fit=crop&w=1200&q=80" },
+  { id: 3, name: "Dining Room", slug: "dining-room", description: "Dining tables & ergonomic chairs", icon: "🍽️", image: "https://images.unsplash.com/photo-1615066390971-03e4e1c36ddf?auto=format&fit=crop&w=1200&q=80" },
+  { id: 4, name: "Office & Study", slug: "office-study", description: "Desks & executive chairs", icon: "💼", image: "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1200&q=80" },
+  { id: 5, name: "Outdoor & Patio", slug: "outdoor-patio", description: "Teak lounges & patio sets", icon: "🪴", image: "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1200&q=80" },
+  { id: 6, name: "Luxury & Decor", slug: "luxury-decor", description: "Console tables & plush rugs", icon: "✨", image: "https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1200&q=80" },
+  { id: 7, name: "Lighting & Accents", slug: "lighting-accents", description: "Floor lamps & wall art", icon: "💡", image: "https://images.unsplash.com/photo-1540932239986-30128078f3c5?auto=format&fit=crop&w=1200&q=80" }
 ];
 
 const FALLBACK_COLLECTIONS = [

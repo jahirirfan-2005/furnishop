@@ -94,20 +94,29 @@ try {
             }
         }
 
-        // Keyword search across name, description, material, color and category name.
+        // Multi-word and partial search across name, brand, sku, category name, material, color, and description.
         if (!empty($_GET['search'])) {
             $search = trim($_GET['search']);
             if ($search !== '') {
-                $where[] = "(p.name LIKE :search OR p.description LIKE :search2
-                             OR p.material LIKE :search3 OR p.color LIKE :search4
-                             OR c.name LIKE :search5 OR p.slug LIKE :search6)";
-                $q = '%' . $search . '%';
-                $params[':search']  = $q;
-                $params[':search2'] = $q;
-                $params[':search3'] = $q;
-                $params[':search4'] = $q;
-                $params[':search5'] = $q;
-                $params[':search6'] = $q;
+                // Split search by whitespace into words to support partial and multi-word searches
+                $words = array_values(array_filter(preg_split('/\s+/', $search), function($w) {
+                    return mb_strlen(trim($w)) > 0;
+                }));
+                if (!empty($words)) {
+                    $searchClauses = [];
+                    $fields = ['p.name', 'p.brand', 'p.sku', 'c.name', 'p.description', 'p.material', 'p.color', 'p.slug'];
+                    foreach ($words as $idx => $word) {
+                        $q = '%' . trim($word) . '%';
+                        $subClauses = [];
+                        foreach ($fields as $fIdx => $field) {
+                            $paramName = ":sw_{$idx}_{$fIdx}";
+                            $subClauses[] = "$field LIKE $paramName";
+                            $params[$paramName] = $q;
+                        }
+                        $searchClauses[] = '(' . implode(' OR ', $subClauses) . ')';
+                    }
+                    $where[] = '(' . implode(' AND ', $searchClauses) . ')';
+                }
             }
         }
 
@@ -170,6 +179,11 @@ try {
             ]);
         }
 
+        if (!empty($_GET['limit']) && is_numeric($_GET['limit'])) {
+            $limit = min(100, max(1, (int)$_GET['limit']));
+            $sql .= " LIMIT $limit";
+        }
+
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = array_map('cast_product', $stmt->fetchAll());
@@ -195,10 +209,16 @@ try {
         $name  = trim($d['name'] ?? '');
         $price = $d['price'] ?? null;
         $image = trim($d['image'] ?? '');
+        $brand = trim($d['brand'] ?? 'FurniCraft');
+        $sku   = trim($d['sku'] ?? '');
 
         if ($name === '')           api_error('Product name is required', 422);
         if (mb_strlen($name) < 2)   api_error('Product name must be at least 2 characters', 422);
         if (mb_strlen($name) > 255) api_error('Product name is too long (max 255 characters)', 422);
+
+        if ($brand === '') {
+            $brand = 'FurniCraft';
+        }
 
         if ($price === null || !is_numeric($price) || (float)$price <= 0) {
             api_error('A valid price greater than 0 is required', 422);
@@ -235,6 +255,20 @@ try {
             $categoryId = 1; // Default: Living Room
         }
 
+        // Validate or generate SKU
+        if ($sku === '') {
+            $catPrefixes = [1=>'LIV', 2=>'BED', 3=>'DIN', 4=>'OFF', 5=>'OUT', 6=>'LUX', 7=>'LGT'];
+            $pfx = $catPrefixes[$categoryId] ?? 'GEN';
+            $sku = sprintf('FURNI-%s-%04d', $pfx, rand(1000, 9999));
+        }
+
+        // Validate SKU uniqueness - duplicate SKUs are strictly rejected
+        $skuChk = $pdo->prepare("SELECT id FROM products WHERE sku = :sku LIMIT 1");
+        $skuChk->execute([':sku' => $sku]);
+        if ($skuChk->fetch()) {
+            api_error("Duplicate SKU: A product with SKU '{$sku}' already exists", 422);
+        }
+
         $collectionId = !empty($d['collection_id']) ? (int)$d['collection_id'] : null;
         if ($collectionId !== null) {
             $colChk = $pdo->prepare("SELECT id FROM collections WHERE id = :id");
@@ -265,20 +299,22 @@ try {
 
         $stmt = $pdo->prepare(
             "INSERT INTO products
-                (category_id, collection_id, name, slug, price, original_price, discount_price,
+                (category_id, brand, collection_id, name, sku, slug, price, original_price, discount_price,
                  stock_quantity, image, back_image, additional_images, description, dimensions,
                  material, color, rating, reviews_count, has_offer, offer_end_time,
                  is_featured, is_trending, stock_status, status)
              VALUES
-                (:category_id, :collection_id, :name, :slug, :price, :original_price, :discount_price,
+                (:category_id, :brand, :collection_id, :name, :sku, :slug, :price, :original_price, :discount_price,
                  :stock_quantity, :image, :back_image, :additional_images, :description, :dimensions,
                  :material, :color, :rating, :reviews_count, :has_offer, :offer_end_time,
                  :is_featured, :is_trending, :stock_status, :status)"
         );
         $stmt->execute([
             ':category_id'       => $categoryId,
+            ':brand'             => $brand,
             ':collection_id'     => $collectionId,
             ':name'              => $name,
+            ':sku'               => $sku,
             ':slug'              => $slug,
             ':price'             => (float)$price,
             ':original_price'    => $originalPrice,
@@ -314,6 +350,9 @@ try {
         $fetch->execute([':id' => $newId]);
         $row = cast_product($fetch->fetch());
 
+        // Update fallback export file in background so snapshots remain accurate
+        @include_once dirname(__DIR__) . '/export_fallback.php';
+
         json_out([
             'status'  => 'success',
             'success' => true,
@@ -335,7 +374,7 @@ try {
         $exists->execute([':id' => $id]);
         if (!$exists->fetch()) api_error('Product not found', 404);
 
-        $allowed = ['name', 'price', 'original_price', 'discount_price', 'image', 'back_image',
+        $allowed = ['name', 'brand', 'sku', 'price', 'original_price', 'discount_price', 'image', 'back_image',
                     'description', 'dimensions', 'material', 'color', 'rating', 'reviews_count',
                     'has_offer', 'offer_end_time', 'is_featured', 'is_trending',
                     'stock_status', 'status', 'category_id', 'collection_id', 'stock_quantity', 'slug'];
@@ -376,6 +415,19 @@ try {
                 $chk->execute([':s' => $slugVal, ':id' => $id]);
                 if ($chk->fetch()) api_error('Slug is already in use by another product', 422);
                 $v = $slugVal;
+            }
+            if ($col === 'brand') {
+                $brandVal = trim((string)$v);
+                if ($brandVal === '') api_error('Brand name cannot be empty', 422);
+                $v = $brandVal;
+            }
+            if ($col === 'sku') {
+                $skuVal = trim((string)$v);
+                if ($skuVal === '') api_error('SKU cannot be empty', 422);
+                $chk = $pdo->prepare("SELECT id FROM products WHERE sku = :s AND id != :id");
+                $chk->execute([':s' => $skuVal, ':id' => $id]);
+                if ($chk->fetch()) api_error("Duplicate SKU: A product with SKU '{$skuVal}' already exists", 422);
+                $v = $skuVal;
             }
             if ($col === 'status' && !in_array($v, ['active', 'inactive'], true)) api_error('Invalid status', 422);
             if ($col === 'rating' && $v !== '' && $v !== null) {

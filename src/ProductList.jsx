@@ -56,17 +56,20 @@ function ProductList({
             className={`pill ${activeCategory === "all" ? "active" : ""}`}
             onClick={() => setActiveCategory("all")}
           >
-            All Categories
+            All Categories ({categories.reduce((acc, c) => acc + (c.product_count ?? c.products_count ?? 0), 0)})
           </button>
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              className={`pill ${activeCategory === cat.slug ? "active" : ""}`}
-              onClick={() => setActiveCategory(cat.slug)}
-            >
-              {cat.icon} {cat.name} ({cat.product_count})
-            </button>
-          ))}
+          {categories.map((cat) => {
+            const isCatActive = activeCategory === cat.slug || String(activeCategory) === String(cat.id);
+            return (
+              <button
+                key={cat.id}
+                className={`pill ${isCatActive ? "active" : ""}`}
+                onClick={() => setActiveCategory(cat.slug)}
+              >
+                {cat.icon} {cat.name} ({cat.product_count ?? cat.products_count ?? 0})
+              </button>
+            );
+          })}
         </div>
 
         {/* Sort Select Dropdown */}
@@ -76,6 +79,7 @@ function ProductList({
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
             className="sort-select"
+            aria-label="Sort products"
           >
             <option value="featured">Sort by: Featured</option>
             <option value="price_low">Price: Low to High</option>
@@ -86,6 +90,34 @@ function ProductList({
           </select>
         </div>
       </div>
+
+      {/* Active Category Header Showcase */}
+      {(() => {
+        const currentCat = activeCategory !== "all"
+          ? categories.find((c) => c.slug === activeCategory || String(c.id) === String(activeCategory))
+          : null;
+        if (!currentCat) return null;
+        return (
+          <div className="category-active-header">
+            <div className="cat-active-info">
+              <span className="cat-active-pill">{currentCat.icon} Category</span>
+              <h3>{currentCat.name}</h3>
+              {currentCat.description && <p>{currentCat.description}</p>}
+            </div>
+            <div className="cat-active-actions">
+              <span className="cat-active-count">
+                {products.length} {products.length === 1 ? "Product" : "Products"} Found
+              </span>
+              <button
+                className="cat-reset-btn"
+                onClick={() => setActiveCategory("all")}
+              >
+                ✕ Clear Category Filter
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Search Feedback Summary */}
       {searchTerm && (
@@ -124,18 +156,44 @@ function ProductList({
       ) : (
         <div className="no-results">
           <FaBoxOpen className="empty-icon" />
-          <h3>No products found for '{searchTerm}'.</h3>
-          <p>Try searching for a different keyword or clear your search to view all items.</p>
-          <button
-            className="btn-primary"
-            onClick={() => {
-              setActiveCategory("all");
-              setActiveCollection("all");
-              setSearchTerm("");
-            }}
-          >
-            Clear Search & Display All Products
-          </button>
+          {searchTerm ? (
+            <>
+              <h3>No products found for "{searchTerm}"</h3>
+              <p>Try searching for a different keyword or explore our full collection.</p>
+              <button className="btn-primary" onClick={() => setSearchTerm("")}>
+                Clear Search
+              </button>
+            </>
+          ) : activeCategory !== "all" ? (
+            <>
+              <h3>No products found in this category</h3>
+              <p>New handcrafted pieces are arriving soon for this space.</p>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setActiveCategory("all");
+                  setActiveCollection("all");
+                }}
+              >
+                Browse All Categories
+              </button>
+            </>
+          ) : (
+            <>
+              <h3>No products match your current filters</h3>
+              <p>Try resetting collection, price, or sorting filters.</p>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  setActiveCategory("all");
+                  setActiveCollection("all");
+                  setSearchTerm("");
+                }}
+              >
+                Reset All Filters
+              </button>
+            </>
+          )}
         </div>
       )}
     </section>

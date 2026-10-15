@@ -1,9 +1,25 @@
 import React, { useState, useRef } from "react";
-import { FaTimes, FaPlusCircle, FaImage, FaTag, FaBoxes, FaLayerGroup, FaPalette, FaRupeeSign, FaTrash, FaUpload } from "react-icons/fa";
+import {
+  FaTimes,
+  FaPlusCircle,
+  FaImage,
+  FaTag,
+  FaBoxes,
+  FaLayerGroup,
+  FaPalette,
+  FaRupeeSign,
+  FaTrash,
+  FaUpload,
+  FaBarcode,
+  FaBuilding,
+  FaMagic
+} from "react-icons/fa";
 import { api, resolveImageUrl } from "./api";
 
 const EMPTY_FORM = {
   name: "",
+  brand: "FurniCraft",
+  sku: "",
   category_id: "",
   collection_id: "",
   price: "",
@@ -17,7 +33,7 @@ const EMPTY_FORM = {
   dimensions: "",
   material: "",
   color: "",
-  rating: "4.5",
+  rating: "4.8",
   stock_status: "In Stock",
   has_offer: false,
   offer_end_time: "",
@@ -26,24 +42,27 @@ const EMPTY_FORM = {
   status: "active"
 };
 
-function AddProductModal({ isOpen, onClose, categories, collections, editingProduct, onProductSaved }) {
-  // The component is remounted with a fresh `key` whenever editingProduct or
-  // open-state changes (see App.jsx), so props are safe initial state here.
+function AddProductModal({ isOpen, onClose, categories = [], collections = [], editingProduct, onProductSaved }) {
   const initialForm = editingProduct
     ? {
         ...EMPTY_FORM,
         ...editingProduct,
+        brand: editingProduct.brand || "FurniCraft",
+        sku: editingProduct.sku || "",
         category_id: String(editingProduct.category_id ?? ""),
         collection_id: editingProduct.collection_id ? String(editingProduct.collection_id) : "",
         price: String(editingProduct.price ?? ""),
         original_price: editingProduct.original_price != null ? String(editingProduct.original_price) : "",
         discount_price: editingProduct.discount_price != null ? String(editingProduct.discount_price) : "",
-        stock_quantity: String(editingProduct.stock_quantity ?? 0),
+        stock_quantity: String(editingProduct.stock_quantity ?? 25),
         additional_images: editingProduct.additional_images_arr || [],
         status: editingProduct.status || "active",
         offer_end_time: editingProduct.offer_end_time ? String(editingProduct.offer_end_time).replace(" ", "T").slice(0, 16) : ""
       }
-    : { ...EMPTY_FORM, category_id: categories.length > 0 ? String(categories[0].id) : "" };
+    : {
+        ...EMPTY_FORM,
+        category_id: categories.length > 0 ? String(categories[0].id) : "1"
+      };
 
   const [formData, setFormData] = useState(initialForm);
   const [submitting, setSubmitting] = useState(false);
@@ -59,6 +78,22 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleGenerateSku = () => {
+    const catPrefixes = {
+      1: "LIV",
+      2: "BED",
+      3: "DIN",
+      4: "OFF",
+      5: "OUT",
+      6: "LUX",
+      7: "LGT"
+    };
+    const prefix = catPrefixes[formData.category_id] || "GEN";
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const newSku = `FURNI-${prefix}-${rand}`;
+    setFormData((prev) => ({ ...prev, sku: newSku }));
   };
 
   /** Upload the main image and store the returned URL. */
@@ -117,30 +152,57 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
     e.preventDefault();
     setErrorMsg("");
 
-    if (!formData.name.trim()) return setErrorMsg("Please enter a product name.");
-    if (!formData.price || parseFloat(formData.price) <= 0) return setErrorMsg("Please enter a valid price.");
-    if (!formData.image.trim()) return setErrorMsg("Please upload or enter a main product image.");
-    if (!formData.category_id) return setErrorMsg("Please select a category.");
+    // Comprehensive frontend validation
+    if (!formData.name.trim() || formData.name.trim().length < 2) {
+      return setErrorMsg("Please enter a valid product name (at least 2 characters).");
+    }
+    if (!formData.brand.trim()) {
+      return setErrorMsg("Please specify the brand (e.g. Nordic Living, FurniCraft).");
+    }
+    if (!formData.category_id) {
+      return setErrorMsg("Please select a valid category.");
+    }
+    const numPrice = parseFloat(formData.price);
+    if (!formData.price || isNaN(numPrice) || numPrice <= 0) {
+      return setErrorMsg("Please enter a valid price greater than ₹0.");
+    }
+    const numStock = parseInt(formData.stock_quantity || "0", 10);
+    if (isNaN(numStock) || numStock < 0) {
+      return setErrorMsg("Stock quantity cannot be negative.");
+    }
+    if (!formData.image.trim()) {
+      return setErrorMsg("Please upload an image or provide a valid image URL.");
+    }
+
+    // Auto-generate SKU if blank
+    let finalSku = formData.sku.trim();
+    if (!finalSku) {
+      const catPrefixes = { 1: "LIV", 2: "BED", 3: "DIN", 4: "OFF", 5: "OUT", 6: "LUX", 7: "LGT" };
+      const pfx = catPrefixes[formData.category_id] || "GEN";
+      finalSku = `FURNI-${pfx}-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
 
     setSubmitting(true);
     try {
       const payload = {
         name: formData.name.trim(),
+        brand: formData.brand.trim(),
+        sku: finalSku,
         category_id: parseInt(formData.category_id, 10),
         collection_id: formData.collection_id ? parseInt(formData.collection_id, 10) : null,
-        price: parseFloat(formData.price),
+        price: numPrice,
         original_price: formData.original_price ? parseFloat(formData.original_price) : null,
         discount_price: formData.discount_price !== "" ? parseFloat(formData.discount_price) : null,
-        stock_quantity: parseInt(formData.stock_quantity || "0", 10),
+        stock_quantity: numStock,
         image: formData.image.trim(),
         back_image: formData.back_image.trim() || formData.image.trim(),
         additional_images: formData.additional_images,
-        description: formData.description,
-        dimensions: formData.dimensions,
-        material: formData.material,
-        color: formData.color,
-        rating: parseFloat(formData.rating) || 4.5,
-        stock_status: formData.stock_quantity === "0" ? "Out of Stock" : formData.stock_status,
+        description: formData.description.trim(),
+        dimensions: formData.dimensions.trim(),
+        material: formData.material.trim(),
+        color: formData.color.trim(),
+        rating: parseFloat(formData.rating) || 4.8,
+        stock_status: numStock === 0 ? "Out of Stock" : formData.stock_status,
         has_offer: formData.has_offer ? 1 : 0,
         offer_end_time: formData.has_offer && formData.offer_end_time ? formData.offer_end_time.replace("T", " ") + ":00" : null,
         is_featured: formData.is_featured ? 1 : 0,
@@ -156,10 +218,10 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
         onProductSaved(res.data, isEdit);
         onClose();
       } else {
-        setErrorMsg(res.message || "Failed to save product");
+        setErrorMsg(res.message || "Failed to save product to database");
       }
     } catch (err) {
-      setErrorMsg(err.message || "Failed to save product");
+      setErrorMsg(err.message || "Failed to save product to database");
     } finally {
       setSubmitting(false);
     }
@@ -178,8 +240,8 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
               <h2>{isEdit ? "Edit Product in Database" : "Store New Product in Database"}</h2>
               <p className="modal-subtitle">
                 {isEdit
-                  ? `Updating "${editingProduct?.name}" - changes are saved to MySQL and go live instantly`
-                  : "Fill in the details below to add a product into the FurniShop database"}
+                  ? `Editing #${editingProduct?.id} "${editingProduct?.name}" - saved permanently in MariaDB`
+                  : "All entered information is validated and stored permanently into the MariaDB database"}
               </p>
             </div>
           </div>
@@ -188,7 +250,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
           </button>
         </div>
 
-        {errorMsg && <div className="form-error-alert">{errorMsg}</div>}
+        {errorMsg && <div className="form-error-alert" role="alert">{errorMsg}</div>}
 
         <form onSubmit={handleSubmit} className="add-product-form">
           <div className="form-grid">
@@ -201,8 +263,52 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                   id="prod-name"
                   type="text"
                   name="name"
-                  placeholder="e.g. Modern Scandinavian Oak Chair"
+                  placeholder="e.g. Modern Scandinavian Oak Armchair"
                   value={formData.name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Brand */}
+            <div className="form-group">
+              <label htmlFor="prod-brand">Brand *</label>
+              <div className="input-with-icon">
+                <FaBuilding className="field-icon" />
+                <input
+                  id="prod-brand"
+                  type="text"
+                  name="brand"
+                  placeholder="e.g. Nordic Living, FurniCraft"
+                  value={formData.brand}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* SKU */}
+            <div className="form-group">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label htmlFor="prod-sku">SKU (Unique Identifier) *</label>
+                <button
+                  type="button"
+                  onClick={handleGenerateSku}
+                  className="sku-auto-btn"
+                  title="Generate a unique category-based SKU"
+                >
+                  <FaMagic /> Auto-Generate
+                </button>
+              </div>
+              <div className="input-with-icon">
+                <FaBarcode className="field-icon" />
+                <input
+                  id="prod-sku"
+                  type="text"
+                  name="sku"
+                  placeholder="e.g. FURNI-LIV-8492"
+                  value={formData.sku}
                   onChange={handleChange}
                   required
                 />
@@ -240,7 +346,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
               </div>
             </div>
 
-            {/* Price */}
+            {/* Sale Price */}
             <div className="form-group">
               <label htmlFor="prod-price">Sale Price (₹) *</label>
               <div className="input-with-icon">
@@ -249,7 +355,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                   id="prod-price"
                   type="number"
                   step="0.01"
-                  min="0"
+                  min="1"
                   name="price"
                   placeholder="14999.00"
                   value={formData.price}
@@ -259,7 +365,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
               </div>
             </div>
 
-            {/* Original Price */}
+            {/* Original MRP Price */}
             <div className="form-group">
               <label htmlFor="prod-orig-price">Original / MRP Price (₹)</label>
               <div className="input-with-icon">
@@ -268,7 +374,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                   id="prod-orig-price"
                   type="number"
                   step="0.01"
-                  min="0"
+                  min="1"
                   name="original_price"
                   placeholder="18999.00"
                   value={formData.original_price}
@@ -277,27 +383,9 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
               </div>
             </div>
 
-            {/* Discount Price */}
-            <div className="form-group">
-              <label htmlFor="prod-discount-price">Discount Price (₹)</label>
-              <div className="input-with-icon">
-                <FaRupeeSign className="field-icon" />
-                <input
-                  id="prod-discount-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  name="discount_price"
-                  placeholder="12999.00 (optional)"
-                  value={formData.discount_price}
-                  onChange={handleChange}
-                />
-              </div>
-            </div>
-
             {/* Stock Quantity */}
             <div className="form-group">
-              <label htmlFor="prod-stock-qty">Stock Quantity</label>
+              <label htmlFor="prod-stock-qty">Stock Quantity *</label>
               <div className="input-with-icon">
                 <FaBoxes className="field-icon" />
                 <input
@@ -307,20 +395,21 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                   name="stock_quantity"
                   value={formData.stock_quantity}
                   onChange={handleChange}
+                  required
                 />
               </div>
             </div>
 
             {/* Color */}
             <div className="form-group">
-              <label htmlFor="prod-color">Color</label>
+              <label htmlFor="prod-color">Color / Finish</label>
               <div className="input-with-icon">
                 <FaPalette className="field-icon" />
                 <input
                   id="prod-color"
                   type="text"
                   name="color"
-                  placeholder="e.g. Emerald Green"
+                  placeholder="e.g. Natural Oak & Champagne Linen"
                   value={formData.color}
                   onChange={handleChange}
                 />
@@ -334,7 +423,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                 id="prod-material"
                 type="text"
                 name="material"
-                placeholder="e.g. Solid White Oak & Velvet"
+                placeholder="e.g. Solid European Oak & Linen"
                 value={formData.material}
                 onChange={handleChange}
               />
@@ -347,7 +436,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                 id="prod-dimensions"
                 type="text"
                 name="dimensions"
-                placeholder="e.g. W: 210cm x D: 90cm x H: 85cm"
+                placeholder="e.g. 84cm W x 78cm D x 82cm H"
                 value={formData.dimensions}
                 onChange={handleChange}
               />
@@ -383,12 +472,12 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
             <div className="form-group full-width">
               <label>Main Product Image *</label>
               <div className="image-upload-row">
-                <div className="image-preview-box" onClick={() => mainFileRef.current?.click()} title="Click to upload">
+                <div className="image-preview-box" onClick={() => mainFileRef.current?.click()} title="Click to upload image">
                   <img src={previewImage} alt="Main product preview" />
                 </div>
                 <div className="image-upload-controls">
                   <button type="button" className="btn-secondary upload-btn" onClick={() => mainFileRef.current?.click()} disabled={uploading}>
-                    <FaUpload /> {uploading ? "Uploading..." : "Upload Image (JPG/PNG/WEBP)"}
+                    <FaUpload /> {uploading ? "Uploading..." : "Upload Image File"}
                   </button>
                   <input
                     ref={mainFileRef}
@@ -402,55 +491,13 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                     <input
                       type="text"
                       name="image"
-                      placeholder="...or paste an image URL"
+                      placeholder="...or paste an image URL directly"
                       value={formData.image}
                       onChange={handleChange}
+                      required
                     />
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Back / hover image */}
-            <div className="form-group full-width">
-              <label htmlFor="prod-back-image">Hover / Back Image URL</label>
-              <div className="input-with-icon">
-                <FaImage className="field-icon" />
-                <input
-                  id="prod-back-image"
-                  type="text"
-                  name="back_image"
-                  placeholder="https://... (optional alternate view)"
-                  value={formData.back_image}
-                  onChange={handleChange}
-                />
-              </div>
-            </div>
-
-            {/* Additional gallery images */}
-            <div className="form-group full-width">
-              <label>Additional Images (up to 10)</label>
-              <div className="additional-images-box">
-                {formData.additional_images.map((img, idx) => (
-                  <div key={idx} className="additional-thumb">
-                    <img src={resolveImageUrl(img)} alt={`Additional ${idx + 1}`} />
-                    <button type="button" className="remove-thumb-btn" onClick={() => removeAdditionalImage(idx)} title="Remove image">
-                      <FaTrash />
-                    </button>
-                  </div>
-                ))}
-                <button type="button" className="add-more-images-btn" onClick={() => addlFileRef.current?.click()} disabled={uploading}>
-                  <FaUpload />
-                  <span>{uploading ? "Uploading..." : "Add Images"}</span>
-                </button>
-                <input
-                  ref={addlFileRef}
-                  type="file"
-                  accept="image/jpeg,image/jpg,image/png,image/webp"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={handleAdditionalUpload}
-                />
               </div>
             </div>
 
@@ -461,17 +508,17 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                 id="prod-desc"
                 name="description"
                 rows="3"
-                placeholder="Describe product highlights, foam density, upholstery texture, frame warranty..."
+                placeholder="Describe product highlights, ergonomics, joinery, and features..."
                 value={formData.description}
                 onChange={handleChange}
               ></textarea>
             </div>
 
-            {/* Visibility / status toggles */}
+            {/* Checkboxes */}
             <div className="form-checkboxes full-width">
               <label className="checkbox-label">
                 <input type="checkbox" name="is_featured" checked={formData.is_featured} onChange={handleChange} />
-                <span>Featured Product</span>
+                <span>Featured Product (shown prominently)</span>
               </label>
 
               <label className="checkbox-label">
@@ -481,20 +528,8 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
 
               <label className="checkbox-label">
                 <input type="checkbox" name="has_offer" checked={formData.has_offer} onChange={handleChange} />
-                <span>Flash Sale / Active Discount</span>
+                <span>Flash Sale / Special Deal</span>
               </label>
-
-              {formData.has_offer && (
-                <label className="checkbox-label offer-end-label">
-                  <span>Offer Ends:</span>
-                  <input
-                    type="datetime-local"
-                    name="offer_end_time"
-                    value={formData.offer_end_time}
-                    onChange={handleChange}
-                  />
-                </label>
-              )}
 
               <label className="checkbox-label">
                 <input
@@ -503,7 +538,7 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
                   checked={formData.status === "active"}
                   onChange={(e) => setFormData((prev) => ({ ...prev, status: e.target.checked ? "active" : "inactive" }))}
                 />
-                <span>Active (visible on storefront)</span>
+                <span>Active (visible to customers in catalog)</span>
               </label>
             </div>
           </div>
@@ -515,8 +550,8 @@ function AddProductModal({ isOpen, onClose, categories, collections, editingProd
             </button>
             <button type="submit" className="btn-primary store-btn" disabled={submitting || uploading}>
               {submitting
-                ? isEdit ? "Updating in Database..." : "Storing in Database..."
-                : isEdit ? "💾 Save Changes" : "💾 Store Product"}
+                ? isEdit ? "Updating in Database..." : "Saving to Database..."
+                : isEdit ? "💾 Save Database Changes" : "💾 Permanently Save to Database"}
             </button>
           </div>
         </form>

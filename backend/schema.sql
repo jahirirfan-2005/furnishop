@@ -23,8 +23,10 @@ CREATE TABLE IF NOT EXISTS collections (
 CREATE TABLE IF NOT EXISTS products (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   category_id INT UNSIGNED NOT NULL,
+  brand VARCHAR(100) NOT NULL DEFAULT 'FurniCraft',
   collection_id INT UNSIGNED DEFAULT NULL,
   name VARCHAR(255) NOT NULL,
+  sku VARCHAR(100) DEFAULT NULL UNIQUE,
   slug VARCHAR(255) DEFAULT NULL,
   description TEXT,
   price DECIMAL(10,2) NOT NULL,
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS products (
 
 -- Performance indexes for product listing, search, filters and admin views
 CREATE INDEX idx_products_category ON products (category_id);
+CREATE INDEX idx_products_brand ON products (brand);
 CREATE INDEX idx_products_collection ON products (collection_id);
 CREATE INDEX idx_products_slug ON products (slug);
 CREATE INDEX idx_products_status ON products (status);

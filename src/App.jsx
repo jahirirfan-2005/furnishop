@@ -96,15 +96,35 @@ function App() {
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
+      // Resolve category ID from database categories to use actual category_id relationship
+      let categoryParam = activeCategory;
+      if (activeCategory && activeCategory !== "all") {
+        const found = categories.find(
+          (c) => String(c.id) === String(activeCategory) || c.slug === activeCategory
+        );
+        if (found) {
+          categoryParam = found.id;
+        }
+      }
+
       const res = await api.getProducts({
-        category: activeCategory,
+        category: categoryParam,
         collection: activeCollection,
         search: searchTerm,
         sort: sortBy
       });
 
       if (res.status === "success") {
-        setProducts(res.data || []);
+        // Guarantee no duplicate products in listing
+        const unique = [];
+        const seen = new Set();
+        (res.data || []).forEach((item) => {
+          if (!seen.has(item.id)) {
+            seen.add(item.id);
+            unique.push(item);
+          }
+        });
+        setProducts(unique);
       }
     } catch (err) {
       console.error("Failed to fetch products:", err);
@@ -112,7 +132,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [activeCategory, activeCollection, searchTerm, sortBy]);
+  }, [activeCategory, activeCollection, searchTerm, sortBy, categories]);
 
   useEffect(() => {
     // Deferred so state updates don't cascade synchronously inside the effect.
@@ -136,6 +156,8 @@ function App() {
     }
   }, [searchTerm]);
 
+  const [adminRefreshKey, setAdminRefreshKey] = useState(0);
+
   // Store / update product handler (used by the admin product form)
   const handleProductSaved = async (savedProduct, wasEdit) => {
     if (wasEdit) {
@@ -151,6 +173,7 @@ function App() {
         theme: theme === "dark" ? "dark" : "colored"
       });
     }
+    setAdminRefreshKey((k) => k + 1);
     await fetchProducts();
     loadInitialData(); // refresh category counts
   };
@@ -260,6 +283,7 @@ function App() {
           onOpenAddProduct={handleOpenAddProduct}
           onEditProduct={handleEditProduct}
           onProductDeleted={handleProductDeleted}
+          refreshTrigger={adminRefreshKey}
           theme={theme}
         />
       ) : (
@@ -272,6 +296,7 @@ function App() {
             onOpenWishlist={() => setIsWishlistOpen(true)}
             onOpenAddProduct={handleOpenAddProduct}
             onOpenAdminPanel={() => navigateTo("admin")}
+            onSelectProduct={(p) => setQuickViewProduct(p)}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             activeCategory={activeCategory}
@@ -283,8 +308,17 @@ function App() {
 
           {/* Hero Banner */}
           <HeroBanner
+            activeCategory={activeCategory}
+            categories={categories}
+            productsCount={products.length}
             collections={collections}
-            onSelectCollection={(slug) => setActiveCollection(slug)}
+            onSelectCollection={(slug) => {
+              setActiveCollection(slug);
+            }}
+            onSelectCategory={(slug) => {
+              setActiveCategory(slug);
+              setActiveCollection("all");
+            }}
           />
 
           {/* Product List & Filter Grid */}
@@ -294,7 +328,10 @@ function App() {
             categories={categories}
             collections={collections}
             activeCategory={activeCategory}
-            setActiveCategory={setActiveCategory}
+            setActiveCategory={(cat) => {
+              setActiveCategory(cat);
+              setActiveCollection("all");
+            }}
             activeCollection={activeCollection}
             setActiveCollection={setActiveCollection}
             sortBy={sortBy}
@@ -312,7 +349,9 @@ function App() {
             categories={categories}
             onSelectCategory={(slug) => {
               setActiveCategory(slug);
-              window.scrollTo({ top: 500, behavior: "smooth" });
+              setActiveCollection("all");
+              const el = document.getElementById("products");
+              if (el) el.scrollIntoView({ behavior: "smooth" });
             }}
           />
 

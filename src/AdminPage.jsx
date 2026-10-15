@@ -32,7 +32,8 @@ export default function AdminPage({
   onBackToStore,
   onOpenAddProduct,
   onEditProduct,
-  onProductDeleted
+  onProductDeleted,
+  refreshTrigger
 }) {
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(Boolean(api.getAdminToken()));
@@ -64,6 +65,7 @@ export default function AdminPage({
   const [statusFilter, setStatusFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [stockInputs, setStockInputs] = useState({});
+  const [priceInputs, setPriceInputs] = useState({});
   const [savingStock, setSavingStock] = useState(null);
 
   // Check auth validity on mount
@@ -121,12 +123,15 @@ export default function AdminPage({
       if (prodRes?.status === "success") {
         const prods = prodRes.data || [];
         setProducts(prods);
-        // Prepopulate stock edit inputs
+        // Prepopulate stock and price edit inputs
         const initialStock = {};
+        const initialPrices = {};
         prods.forEach((p) => {
           initialStock[p.id] = p.stock_quantity;
+          initialPrices[p.id] = p.price;
         });
         setStockInputs(initialStock);
+        setPriceInputs(initialPrices);
       }
     } catch (err) {
       if (err.message && err.message.toLowerCase().includes("unauthorized")) {
@@ -141,13 +146,12 @@ export default function AdminPage({
     }
   }, []);
 
-  // Fetch data when authenticated
+  // Fetch data when authenticated or when refreshTrigger triggers
   useEffect(() => {
     if (isAuthenticated) {
-// eslint-disable-next-line react-hooks/set-state-in-effect
       fetchAdminData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchAdminData, refreshTrigger]);
   // Handle Login submission
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -226,19 +230,20 @@ export default function AdminPage({
   };
 
   // Product operations
-  const handleDeleteProduct = async (productId, prodName) => {
-    if (!window.confirm(`Are you sure you want to delete "${prodName}" from the database?`)) {
+  const handleDeleteProduct = async (productId, prodName, prodSku) => {
+    const label = prodSku ? `"${prodName}" (SKU: ${prodSku})` : `"${prodName}"`;
+    if (!window.confirm(`Are you sure you want to permanently delete ${label} from the database? This action cannot be undone.`)) {
       return;
     }
     try {
       const res = await api.deleteProduct(productId);
       if (res.status === "success") {
-        toast.info(`Product "${prodName}" removed.`);
+        toast.info(`Product ${label} removed from database.`);
         setProducts((prev) => prev.filter((p) => p.id !== productId));
         if (onProductDeleted) onProductDeleted(productId);
       }
     } catch (err) {
-      toast.error(err.message || "Failed to delete product.");
+      toast.error(err.message || "Failed to delete product from database.");
     }
   };
 
@@ -246,16 +251,29 @@ export default function AdminPage({
     setStockInputs((prev) => ({ ...prev, [productId]: val }));
   };
 
-  const handleStockSave = async (product) => {
-    const rawVal = stockInputs[product.id];
+  const handlePriceInputChange = (productId, val) => {
+    setPriceInputs((prev) => ({ ...prev, [productId]: val }));
+  };
+
+  const handlePriceAndStockSave = async (product) => {
+    const rawVal = stockInputs[product.id] ?? product.stock_quantity;
     const qty = parseInt(rawVal, 10);
+    const rawPrice = priceInputs[product.id] ?? product.price;
+    const prc = parseFloat(rawPrice);
+
     if (Number.isNaN(qty) || qty < 0) {
-      toast.warning("Please enter a valid stock number.");
+      toast.warning("Please enter a valid stock quantity (0 or more).");
       return;
     }
+    if (Number.isNaN(prc) || prc <= 0) {
+      toast.warning("Please enter a valid price (greater than 0).");
+      return;
+    }
+
     setSavingStock(product.id);
     try {
       const res = await api.updateProduct(product.id, {
+        price: prc,
         stock_quantity: qty,
         stock_status: qty === 0 ? "Out of Stock" : qty <= 5 ? "Low Stock" : "In Stock"
       });
@@ -263,10 +281,10 @@ export default function AdminPage({
         setProducts((prev) =>
           prev.map((p) => (p.id === product.id ? { ...p, ...res.data } : p))
         );
-        toast.success(`Stock for "${product.name}" updated to ${qty}.`);
+        toast.success(`💾 Price (₹${prc.toLocaleString("en-IN")}) & Stock (${qty}) saved to database!`);
       }
     } catch (err) {
-      toast.error(err.message || "Failed to update stock quantity.");
+      toast.error(err.message || "Failed to update price/stock in database.");
     } finally {
       setSavingStock(null);
     }
@@ -318,6 +336,8 @@ export default function AdminPage({
     const q = searchTerm.toLowerCase();
     const matchesSearch =
       prod.name?.toLowerCase().includes(q) ||
+      (prod.sku && prod.sku.toLowerCase().includes(q)) ||
+      (prod.brand && prod.brand.toLowerCase().includes(q)) ||
       (prod.category_name && prod.category_name.toLowerCase().includes(q)) ||
       (prod.material && prod.material.toLowerCase().includes(q));
     const matchesCategory =
@@ -777,8 +797,13 @@ export default function AdminPage({
                               </div>
                             )}
                             <div className="prod-cell-info">
-                              <span className="prod-cell-name">{p.name}</span>
-                              <span className="prod-cell-cat">{p.material || "Wood / Fabric"}</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                <span className="prod-cell-name">{p.name}</span>
+                                {p.sku && <span className="admin-sku-tag">{p.sku}</span>}
+                              </div>
+                              <span className="prod-cell-cat">
+                                {p.brand ? <strong>{p.brand} • </strong> : ""}{p.material || "Wood / Fabric"}
+                              </span>
                             </div>
                           </div>
                         </td>
@@ -786,7 +811,18 @@ export default function AdminPage({
                         <td>{p.category_name || "Catalog"}</td>
 
                         <td>
-                          <strong>₹{price.toLocaleString("en-IN")}</strong>
+                          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <span style={{ color: "#b08d4f", fontWeight: 700, fontSize: "14px" }}>₹</span>
+                            <input
+                              type="number"
+                              step="1"
+                              min="0"
+                              className="price-input"
+                              value={priceInputs[p.id] ?? p.price}
+                              onChange={(e) => handlePriceInputChange(p.id, e.target.value)}
+                              title="Edit price in INR"
+                            />
+                          </div>
                         </td>
 
                         <td>
@@ -797,12 +833,14 @@ export default function AdminPage({
                               className="stock-input"
                               value={stockInputs[p.id] ?? p.stock_quantity}
                               onChange={(e) => handleStockInputChange(p.id, e.target.value)}
+                              title="Edit stock quantity"
                             />
                             <button
                               type="button"
                               className="stock-save-btn"
-                              onClick={() => handleStockSave(p)}
+                              onClick={() => handlePriceAndStockSave(p)}
                               disabled={savingStock === p.id}
+                              title="Save Price & Stock changes to database"
                             >
                               {savingStock === p.id ? "..." : "Save"}
                             </button>
@@ -845,8 +883,8 @@ export default function AdminPage({
                             <button
                               type="button"
                               className="table-icon-btn danger"
-                              onClick={() => handleDeleteProduct(p.id, p.name)}
-                              title="Delete product from database"
+                              onClick={() => handleDeleteProduct(p.id, p.name, p.sku)}
+                              title="Delete product permanently from database"
                             >
                               <FaTrash />
                             </button>
