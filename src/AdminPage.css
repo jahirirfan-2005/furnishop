@@ -888,6 +888,8 @@
   text-align: left;
 }
 
+
+
 /* ---------------- Responsive Rules ---------------- */
 @media (max-width: 1100px) {
   .admin-kpi-grid {

@@ -9,6 +9,7 @@ set BASEDIR=%~dp0
 set PHP=C:\xampp\php\php.exe
 set MYSQLD=C:\xampp\mysql\bin\mysqld.exe
 set MYSQL=C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe
+if not exist "%MYSQL%" set MYSQL=C:\xampp\mysql\bin\mysql.exe
 
 REM ---------- Load environment variables from backend\.env ----------
 if exist "%BASEDIR%.env" (
@@ -18,8 +19,8 @@ if exist "%BASEDIR%.env" (
 )
 
 REM ---------- Port configuration ----------
-if not defined API_PORT set API_PORT=8000
-REM Set API_PORT=8001 in backend\.env if another app occupies 8000.
+if not defined API_PORT set API_PORT=8001
+REM Set API_PORT=8001 matching Vite proxy configuration.
 
 echo [1/3] Starting MariaDB (project database, port 3307)...
 start "FurniShop MariaDB" /MIN "%MYSQLD%" --defaults-file="%BASEDIR%my.ini"

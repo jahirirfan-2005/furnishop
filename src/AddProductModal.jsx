@@ -12,7 +12,12 @@ import {
   FaUpload,
   FaBarcode,
   FaBuilding,
-  FaMagic
+  FaMagic,
+  FaCouch,
+  FaRulerCombined,
+  FaCheckCircle,
+  FaStar,
+  FaExclamationCircle
 } from "react-icons/fa";
 import { api, resolveImageUrl } from "./api";
 
@@ -70,6 +75,7 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
   const [errorMsg, setErrorMsg] = useState("");
   const mainFileRef = useRef(null);
   const addlFileRef = useRef(null);
+  const modalContainerRef = useRef(null);
 
   const isEdit = Boolean(editingProduct);
 
@@ -152,30 +158,78 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
     e.preventDefault();
     setErrorMsg("");
 
+    const showError = (msg) => {
+      setErrorMsg(msg);
+      if (modalContainerRef.current) {
+        modalContainerRef.current.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+
     // Comprehensive frontend validation
     if (!formData.name.trim() || formData.name.trim().length < 2) {
-      return setErrorMsg("Please enter a valid product name (at least 2 characters).");
+      return showError("Please enter a valid product name (at least 2 characters).");
+    }
+    if (formData.name.trim().length > 255) {
+      return showError("Product name is too long (maximum 255 characters).");
     }
     if (!formData.brand.trim()) {
-      return setErrorMsg("Please specify the brand (e.g. Nordic Living, FurniCraft).");
+      return showError("Please specify the brand (e.g. Nordic Living, FurniCraft).");
     }
     if (!formData.category_id) {
-      return setErrorMsg("Please select a valid category.");
-    }
-    const numPrice = parseFloat(formData.price);
-    if (!formData.price || isNaN(numPrice) || numPrice <= 0) {
-      return setErrorMsg("Please enter a valid price greater than ₹0.");
-    }
-    const numStock = parseInt(formData.stock_quantity || "0", 10);
-    if (isNaN(numStock) || numStock < 0) {
-      return setErrorMsg("Stock quantity cannot be negative.");
-    }
-    if (!formData.image.trim()) {
-      return setErrorMsg("Please upload an image or provide a valid image URL.");
+      return showError("Please select a valid category.");
     }
 
-    // Auto-generate SKU if blank
+    // Price validation
+    const numPrice = parseFloat(formData.price);
+    if (!formData.price || isNaN(numPrice) || numPrice <= 0) {
+      return showError("Please enter a valid sale price greater than ₹0.");
+    }
+
+    // Original MRP price validation: Sale price must NOT exceed Original/MRP price
+    const numOriginal = formData.original_price !== "" && formData.original_price != null
+      ? parseFloat(formData.original_price)
+      : null;
+    if (numOriginal !== null) {
+      if (isNaN(numOriginal) || numOriginal <= 0) {
+        return showError("Original / MRP price must be a valid number greater than ₹0.");
+      }
+      if (numPrice > numOriginal) {
+        return showError(
+          `Sale price (₹${numPrice.toFixed(2)}) cannot exceed the Original / MRP price (₹${numOriginal.toFixed(2)}). Please adjust the prices.`
+        );
+      }
+    }
+
+    // Discount price validation
+    const numDiscount = formData.discount_price !== "" && formData.discount_price != null
+      ? parseFloat(formData.discount_price)
+      : null;
+    if (numDiscount !== null) {
+      if (isNaN(numDiscount) || numDiscount <= 0) {
+        return showError("Discount price must be a valid number greater than ₹0.");
+      }
+      if (numDiscount > numPrice) {
+        return showError(
+          `Discount price (₹${numDiscount.toFixed(2)}) cannot exceed the regular sale price (₹${numPrice.toFixed(2)}).`
+        );
+      }
+    }
+
+    // Stock quantity validation
+    const numStock = parseInt(formData.stock_quantity || "0", 10);
+    if (isNaN(numStock) || numStock < 0) {
+      return showError("Stock quantity cannot be negative.");
+    }
+
+    if (!formData.image.trim()) {
+      return showError("Please upload an image or provide a valid image URL.");
+    }
+
+    // SKU validation & auto-generation
     let finalSku = formData.sku.trim();
+    if (finalSku && !/^[A-Za-z0-9\-_]+$/.test(finalSku)) {
+      return showError("SKU can only contain letters, numbers, hyphens, and underscores.");
+    }
     if (!finalSku) {
       const catPrefixes = { 1: "LIV", 2: "BED", 3: "DIN", 4: "OFF", 5: "OUT", 6: "LUX", 7: "LGT" };
       const pfx = catPrefixes[formData.category_id] || "GEN";
@@ -191,8 +245,8 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
         category_id: parseInt(formData.category_id, 10),
         collection_id: formData.collection_id ? parseInt(formData.collection_id, 10) : null,
         price: numPrice,
-        original_price: formData.original_price ? parseFloat(formData.original_price) : null,
-        discount_price: formData.discount_price !== "" ? parseFloat(formData.discount_price) : null,
+        original_price: numOriginal,
+        discount_price: numDiscount,
         stock_quantity: numStock,
         image: formData.image.trim(),
         back_image: formData.back_image.trim() || formData.image.trim(),
@@ -218,10 +272,10 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
         onProductSaved(res.data, isEdit);
         onClose();
       } else {
-        setErrorMsg(res.message || "Failed to save product to database");
+        showError(res.message || "Failed to save product to database");
       }
     } catch (err) {
-      setErrorMsg(err.message || "Failed to save product to database");
+      showError(err.message || "Failed to save product to database");
     } finally {
       setSubmitting(false);
     }
@@ -232,11 +286,13 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-container add-product-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-container add-product-modal" ref={modalContainerRef} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div className="header-title-wrapper">
-            {isEdit ? <FaBoxes className="modal-icon" /> : <FaPlusCircle className="modal-icon" />}
-            <div>
+            <div className="modal-icon-badge">
+              {isEdit ? <FaBoxes className="modal-icon" /> : <FaPlusCircle className="modal-icon" />}
+            </div>
+            <div className="header-text-group">
               <h2>{isEdit ? "Edit Product in Database" : "Store New Product in Database"}</h2>
               <p className="modal-subtitle">
                 {isEdit
@@ -250,7 +306,12 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
           </button>
         </div>
 
-        {errorMsg && <div className="form-error-alert" role="alert">{errorMsg}</div>}
+        {errorMsg && (
+          <div className="form-error-alert" role="alert">
+            <FaExclamationCircle className="alert-icon" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="add-product-form">
           <div className="form-grid">
@@ -290,7 +351,7 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
 
             {/* SKU */}
             <div className="form-group">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="sku-label-row">
                 <label htmlFor="prod-sku">SKU (Unique Identifier) *</label>
                 <button
                   type="button"
@@ -419,53 +480,65 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
             {/* Material */}
             <div className="form-group">
               <label htmlFor="prod-material">Material & Craftsmanship</label>
-              <input
-                id="prod-material"
-                type="text"
-                name="material"
-                placeholder="e.g. Solid European Oak & Linen"
-                value={formData.material}
-                onChange={handleChange}
-              />
+              <div className="input-with-icon">
+                <FaCouch className="field-icon" />
+                <input
+                  id="prod-material"
+                  type="text"
+                  name="material"
+                  placeholder="e.g. Solid European Oak & Linen"
+                  value={formData.material}
+                  onChange={handleChange}
+                />
+              </div>
             </div>
 
             {/* Dimensions */}
             <div className="form-group">
               <label htmlFor="prod-dimensions">Dimensions</label>
-              <input
-                id="prod-dimensions"
-                type="text"
-                name="dimensions"
-                placeholder="e.g. 84cm W x 78cm D x 82cm H"
-                value={formData.dimensions}
-                onChange={handleChange}
-              />
+              <div className="input-with-icon">
+                <FaRulerCombined className="field-icon" />
+                <input
+                  id="prod-dimensions"
+                  type="text"
+                  name="dimensions"
+                  placeholder="e.g. 84cm W x 78cm D x 82cm H"
+                  value={formData.dimensions}
+                  onChange={handleChange}
+                />
+              </div>
             </div>
 
             {/* Stock Status */}
             <div className="form-group">
               <label htmlFor="prod-stock">Stock Availability</label>
-              <select id="prod-stock" name="stock_status" value={formData.stock_status} onChange={handleChange}>
-                <option value="In Stock">In Stock</option>
-                <option value="Low Stock">Low Stock</option>
-                <option value="Pre-order">Pre-Order</option>
-                <option value="Out of Stock">Out of Stock</option>
-              </select>
+              <div className="input-with-icon">
+                <FaCheckCircle className="field-icon" />
+                <select id="prod-stock" name="stock_status" value={formData.stock_status} onChange={handleChange}>
+                  <option value="In Stock">In Stock</option>
+                  <option value="Low Stock">Low Stock</option>
+                  <option value="Pre-order">Pre-Order</option>
+                  <option value="Out of Stock">Out of Stock</option>
+                </select>
+              </div>
             </div>
 
             {/* Rating */}
             <div className="form-group">
               <label htmlFor="prod-rating">Rating (1.0 to 5.0)</label>
-              <input
-                id="prod-rating"
-                type="number"
-                step="0.1"
-                min="1"
-                max="5"
-                name="rating"
-                value={formData.rating}
-                onChange={handleChange}
-              />
+              <div className="input-with-icon">
+                <FaStar className="field-icon" />
+                <input
+                  id="prod-rating"
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  max="5"
+                  name="rating"
+                  value={formData.rating}
+                  onChange={handleChange}
+                />
+              </div>
             </div>
 
             {/* Main image upload */}

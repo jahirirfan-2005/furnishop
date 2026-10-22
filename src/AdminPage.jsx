@@ -195,6 +195,9 @@ export default function AdminPage({
     api.setAdminToken(null);
     localStorage.removeItem("furni_admin_user_obj");
     localStorage.removeItem("furni_admin_user");
+    setLoginUsername("");
+    setLoginPassword("");
+    setLoginError("");
     setIsAuthenticated(false);
     toast.info("Logged out from admin session.");
   };
@@ -364,32 +367,36 @@ export default function AdminPage({
 
           {loginError && <div className="login-error-alert">{loginError}</div>}
 
-          <form onSubmit={handleLoginSubmit} className="login-form">
+          <form onSubmit={handleLoginSubmit} className="login-form" autoComplete="off">
             <div>
-              <label>Administrator Username</label>
+              <label htmlFor="admin-username">Administrator Username</label>
               <div className="login-input-wrap">
                 <FaUserShield className="field-icon" />
                 <input
+                  id="admin-username"
+                  name="admin_username"
                   type="text"
-                  placeholder="Username or admin email"
+                  placeholder="Enter administrator username"
                   value={loginUsername}
                   onChange={(e) => setLoginUsername(e.target.value)}
-                  autoComplete="username"
+                  autoComplete="off"
                   required
                 />
               </div>
             </div>
 
             <div>
-              <label>Secure Password</label>
+              <label htmlFor="admin-password">Secure Password</label>
               <div className="login-input-wrap">
                 <FaLock className="field-icon" />
                 <input
+                  id="admin-password"
+                  name="admin_password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Enter administrator password"
+                  placeholder="Enter your password"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   required
                 />
                 <button

@@ -22,7 +22,7 @@ $password = $argv[3] ?? '';
 if (!$username || !$email || !$password) {
     echo "=== FurniShop Admin Provisioning Tool ===\n";
     echo "Usage: php backend/create_admin.php <username> <email> <password>\n";
-    echo "Example: php backend/create_admin.php admin admin@furnishop.com LuxuryStore2026!\n";
+    echo "Example: php backend/create_admin.php <username> <email> <password>\n";
     exit(1);
 }
 

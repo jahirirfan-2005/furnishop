@@ -163,8 +163,26 @@ const saveLocalWishlist = (wl) => localStorage.setItem("furni_wishlist", JSON.st
 
 const handleResponse = async (res, fallbackMessage) => {
   if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.message || fallbackMessage || `Request failed (${res.status})`);
+    let errMessage = "";
+    try {
+      const errData = await res.json();
+      if (errData && errData.message) {
+        errMessage = errData.message;
+      }
+    } catch {
+      // Body not valid JSON (e.g. 502/504 gateway timeout HTML or proxy error)
+    }
+
+    if (!errMessage) {
+      if (res.status === 502 || res.status === 504 || res.status === 503) {
+        errMessage = "Backend server is offline or unreachable (port 8001). Please ensure MariaDB and the PHP server are running.";
+      } else if (res.status === 401) {
+        errMessage = fallbackMessage || "Invalid username or password.";
+      } else {
+        errMessage = fallbackMessage || `Request failed (${res.status})`;
+      }
+    }
+    throw new Error(errMessage);
   }
   return res.json();
 };
@@ -570,16 +588,23 @@ export const api = {
       username = usernameOrCreds.username;
       password = usernameOrCreds.password;
     }
-    const res = await fetch(`${API_BASE}/auth.php?action=login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await handleResponse(res, "Login failed");
-    if (data.status === "success" && data.data?.token) {
-      this.setAdminToken(data.data.token);
+    try {
+      const res = await fetch(`${API_BASE}/auth.php?action=login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await handleResponse(res, "Invalid username or password.");
+      if (data.status === "success" && data.data?.token) {
+        this.setAdminToken(data.data.token);
+      }
+      return data;
+    } catch (err) {
+      if (err.name === "TypeError" && (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed"))) {
+        throw new Error("Unable to connect to backend server. Please make sure the PHP backend server (port 8001) is running.");
+      }
+      throw err;
     }
-    return data;
   },
 
   async adminLogout() {

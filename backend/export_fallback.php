@@ -20,7 +20,10 @@
 require_once __DIR__ . '/api/config.php';
 /** @var PDO $pdo */
 
-echo "=== FurniShop static catalog export ===\n";
+$isCli = (php_sapi_name() === 'cli');
+if ($isCli) {
+    echo "=== FurniShop static catalog export ===\n";
+}
 
 $sql = "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
                col.title AS collection_title, col.slug AS collection_slug
@@ -52,14 +55,16 @@ if (@file_put_contents($outPath, $json . "\n") === false) {
     exit(1);
 }
 
-echo "Exported " . count($products) . " active products to $outPath\n";
-foreach ($products as $p) {
-    printf("  - [%3d] %-38s %-14s stock=%d%s\n",
-        $p['id'],
-        $p['name'],
-        $p['category_slug'] ?? '-',
-        $p['stock_quantity'] ?? 0,
-        !empty($p['image']) ? '' : '  (no image!)'
-    );
+if ($isCli) {
+    echo "Exported " . count($products) . " active products to $outPath\n";
+    foreach ($products as $p) {
+        printf("  - [%3d] %-38s %-14s stock=%d%s\n",
+            $p['id'],
+            $p['name'],
+            $p['category_slug'] ?? '-',
+            $p['stock_quantity'] ?? 0,
+            !empty($p['image']) ? '' : '  (no image!)'
+        );
+    }
+    echo "Done. Commit the updated snapshot to refresh static deployments.\n";
 }
-echo "Done. Commit the updated snapshot to refresh static deployments.\n";

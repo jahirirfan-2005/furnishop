@@ -239,7 +239,7 @@ try {
             if ($discountPrice > (float)$price) api_error('Discount price cannot exceed regular price', 422);
         }
         if ($originalPrice !== null && $originalPrice < (float)$price) {
-            api_error('Original price cannot be less than regular price', 422);
+            api_error("Sale price (₹" . number_format((float)$price, 2) . ") cannot exceed Original / MRP price (₹" . number_format($originalPrice, 2) . "). Please adjust your prices.", 422);
         }
 
         if ($image === '') api_error('A product image is required', 422);
@@ -297,61 +297,73 @@ try {
 
         $slug = !empty($d['slug']) ? make_slug($pdo, $d['slug'], '`products`') : make_slug($pdo, $name, '`products`');
 
-        $stmt = $pdo->prepare(
-            "INSERT INTO products
-                (category_id, brand, collection_id, name, sku, slug, price, original_price, discount_price,
-                 stock_quantity, image, back_image, additional_images, description, dimensions,
-                 material, color, rating, reviews_count, has_offer, offer_end_time,
-                 is_featured, is_trending, stock_status, status)
-             VALUES
-                (:category_id, :brand, :collection_id, :name, :sku, :slug, :price, :original_price, :discount_price,
-                 :stock_quantity, :image, :back_image, :additional_images, :description, :dimensions,
-                 :material, :color, :rating, :reviews_count, :has_offer, :offer_end_time,
-                 :is_featured, :is_trending, :stock_status, :status)"
-        );
-        $stmt->execute([
-            ':category_id'       => $categoryId,
-            ':brand'             => $brand,
-            ':collection_id'     => $collectionId,
-            ':name'              => $name,
-            ':sku'               => $sku,
-            ':slug'              => $slug,
-            ':price'             => (float)$price,
-            ':original_price'    => $originalPrice,
-            ':discount_price'    => $discountPrice,
-            ':stock_quantity'    => $stockQty,
-            ':image'             => $image,
-            ':back_image'        => !empty($d['back_image']) ? trim($d['back_image']) : $image,
-            ':additional_images' => $additionalJson,
-            ':description'       => trim($d['description'] ?? ''),
-            ':dimensions'        => !empty($d['dimensions']) ? trim($d['dimensions']) : null,
-            ':material'          => !empty($d['material']) ? trim($d['material']) : null,
-            ':color'             => !empty($d['color']) ? trim($d['color']) : null,
-            ':rating'            => isset($d['rating']) && is_numeric($d['rating']) ? min(5.0, max(1.0, (float)$d['rating'])) : 4.5,
-            ':reviews_count'     => (int)($d['reviews_count'] ?? 0),
-            ':has_offer'         => !empty($d['has_offer']) ? 1 : 0,
-            ':offer_end_time'    => !empty($d['offer_end_time']) ? $d['offer_end_time'] : null,
-            ':is_featured'       => !empty($d['is_featured']) ? 1 : 0,
-            ':is_trending'       => !empty($d['is_trending']) ? 1 : 0,
-            ':stock_status'      => $stockStatus,
-            ':status'            => $status,
-        ]);
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare(
+                "INSERT INTO products
+                    (category_id, brand, collection_id, name, sku, slug, price, original_price, discount_price,
+                     stock_quantity, image, back_image, additional_images, description, dimensions,
+                     material, color, rating, reviews_count, has_offer, offer_end_time,
+                     is_featured, is_trending, stock_status, status)
+                 VALUES
+                    (:category_id, :brand, :collection_id, :name, :sku, :slug, :price, :original_price, :discount_price,
+                     :stock_quantity, :image, :back_image, :additional_images, :description, :dimensions,
+                     :material, :color, :rating, :reviews_count, :has_offer, :offer_end_time,
+                     :is_featured, :is_trending, :stock_status, :status)"
+            );
+            $stmt->execute([
+                ':category_id'       => $categoryId,
+                ':brand'             => $brand,
+                ':collection_id'     => $collectionId,
+                ':name'              => $name,
+                ':sku'               => $sku,
+                ':slug'              => $slug,
+                ':price'             => (float)$price,
+                ':original_price'    => $originalPrice,
+                ':discount_price'    => $discountPrice,
+                ':stock_quantity'    => $stockQty,
+                ':image'             => $image,
+                ':back_image'        => !empty($d['back_image']) ? trim($d['back_image']) : $image,
+                ':additional_images' => $additionalJson,
+                ':description'       => trim($d['description'] ?? ''),
+                ':dimensions'        => !empty($d['dimensions']) ? trim($d['dimensions']) : null,
+                ':material'          => !empty($d['material']) ? trim($d['material']) : null,
+                ':color'             => !empty($d['color']) ? trim($d['color']) : null,
+                ':rating'            => isset($d['rating']) && is_numeric($d['rating']) ? min(5.0, max(1.0, (float)$d['rating'])) : 4.5,
+                ':reviews_count'     => (int)($d['reviews_count'] ?? 0),
+                ':has_offer'         => !empty($d['has_offer']) ? 1 : 0,
+                ':offer_end_time'    => !empty($d['offer_end_time']) ? $d['offer_end_time'] : null,
+                ':is_featured'       => !empty($d['is_featured']) ? 1 : 0,
+                ':is_trending'       => !empty($d['is_trending']) ? 1 : 0,
+                ':stock_status'      => $stockStatus,
+                ':status'            => $status,
+            ]);
 
-        $newId = (int)$pdo->lastInsertId();
+            $newId = (int)$pdo->lastInsertId();
 
-        $fetch = $pdo->prepare(
-            "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
-                    col.title AS collection_title, col.slug AS collection_slug
-             FROM products p
-             LEFT JOIN categories c ON c.id = p.category_id
-             LEFT JOIN collections col ON col.id = p.collection_id
-             WHERE p.id = :id"
-        );
-        $fetch->execute([':id' => $newId]);
-        $row = cast_product($fetch->fetch());
+            $fetch = $pdo->prepare(
+                "SELECT p.*, c.name AS category_name, c.slug AS category_slug,
+                        col.title AS collection_title, col.slug AS collection_slug
+                 FROM products p
+                 LEFT JOIN categories c ON c.id = p.category_id
+                 LEFT JOIN collections col ON col.id = p.collection_id
+                 WHERE p.id = :id"
+            );
+            $fetch->execute([':id' => $newId]);
+            $row = cast_product($fetch->fetch());
 
-        // Update fallback export file in background so snapshots remain accurate
-        @include_once dirname(__DIR__) . '/export_fallback.php';
+            $pdo->commit();
+        } catch (Throwable $t) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $t;
+        }
+
+        // Update fallback export file in background so snapshots remain accurate (silently)
+        ob_start();
+        @include dirname(__DIR__) . '/export_fallback.php';
+        ob_end_clean();
 
         json_out([
             'status'  => 'success',
@@ -499,9 +511,24 @@ try {
     api_error('Method not allowed', 405);
 
 } catch (PDOException $e) {
-    // Log internally; never expose SQL details to the client.
+    // Log internally; never expose SQL credentials/details to the client.
     error_log('[FurniShop API] products.php PDOException: ' . $e->getMessage());
-    api_error('Something went wrong while processing your request', 500);
+    $code = $e->getCode();
+    $sqlErr = (int)($e->errorInfo[1] ?? 0);
+    $msg = $e->getMessage();
+    if ($code === '23000' || $sqlErr === 1062) {
+        if (str_contains($msg, 'uq_products_sku') || str_contains($msg, 'sku')) {
+            api_error("Duplicate SKU: A product with this SKU already exists in MariaDB", 422);
+        } elseif (str_contains($msg, 'uq_products_slug') || str_contains($msg, 'slug')) {
+            api_error("Duplicate product slug: A product with a similar name already exists", 422);
+        } else {
+            api_error("A database unique constraint was violated. Please check for duplicate values.", 422);
+        }
+    } elseif ($sqlErr === 1452) {
+        api_error("Invalid category or collection reference", 422);
+    } else {
+        api_error("Database error occurred while processing product. Please check the entered data.", 500);
+    }
 } catch (Throwable $e) {
     error_log('[FurniShop API] products.php Throwable: ' . $e->getMessage());
     api_error('Something went wrong while processing your request', 500);
