@@ -110,18 +110,36 @@ const fallbackResponse = (message) => ({
 });
 
 /**
- * Resolve a product image reference to a full URL.
- * - Full URLs (http/https) are returned unchanged.
- * - Root-relative upload paths ("/backend/uploads/products/x.jpg") are
- *   prefixed with the API origin.
- * - Bare upload filenames are resolved against the uploads folder.
+ * Resolve a product image reference to a full, reliable URL.
+ * - Full URLs (http/https/data URI) are returned unchanged.
+ * - Cloudinary and S3 URLs are returned directly.
+ * - Root-relative and relative upload paths are normalized and prefixed with
+ *   VITE_MEDIA_BASE_URL or the backend API origin.
  */
 export const resolveImageUrl = (path) => {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith("/")) return `${API_ORIGIN}${path}`;
-  if (path.startsWith("uploads/")) return `${API_ORIGIN}/backend/${path}`;
-  return path;
+  if (!path || typeof path !== "string") return "";
+  const trimmed = path.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:")) {
+    return trimmed;
+  }
+
+  const mediaBase = (import.meta.env.VITE_MEDIA_BASE_URL || API_ORIGIN).replace(/\/+$/, "");
+  let clean = trimmed.replace(/\\/g, "/");
+
+  if (!clean.startsWith("/")) {
+    clean = "/" + clean;
+  }
+
+  if (clean.startsWith("/uploads/")) {
+    clean = "/backend" + clean;
+  }
+
+  if (clean.startsWith("/backend/")) {
+    return `${mediaBase}${clean}`;
+  }
+
+  return clean;
 };
 
 const getSessionId = () => {
@@ -568,6 +586,21 @@ export const api = {
     return await handleResponse(res, "Failed to delete order");
   },
 
+  /* ============================ SYSTEM HEALTH ============================== */
+
+  async checkHealth() {
+    try {
+      const res = await fetch(`${API_BASE}/health.php`, { cache: "no-store" });
+      return await handleResponse(res, "Health check failed");
+    } catch (err) {
+      return {
+        status: "error",
+        success: false,
+        message: err.message || "Backend server is offline or unreachable (port 8001)."
+      };
+    }
+  },
+
   /* ============================ AUTHENTICATION ============================== */
 
   async getAuthStatus() {
@@ -576,8 +609,12 @@ export const api = {
         headers: this.authHeaders()
       });
       return await handleResponse(res, "Auth status failed");
-    } catch {
-      return { status: "success", data: { has_admin: true, is_logged_in: !!this.getAdminToken() } };
+    } catch (err) {
+      return {
+        status: "error",
+        success: false,
+        message: err.message || "Auth status unavailable"
+      };
     }
   },
 

@@ -24,7 +24,7 @@ import {
   FaLock,
   FaTimes
 } from "react-icons/fa";
-import { api } from "./api";
+import { api, resolveImageUrl } from "./api";
 import { toast } from "react-toastify";
 import "./AdminPage.css";
 
@@ -54,6 +54,53 @@ export default function AdminPage({
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
+
+  // Backend Health State
+  const [serverStatus, setServerStatus] = useState({
+    checked: false,
+    online: false,
+    loading: true,
+    message: ""
+  });
+
+  // Verify backend health and remove misleading offline errors when server is available
+  const verifyServerHealth = useCallback(async () => {
+    setServerStatus((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await api.checkHealth();
+      if (res?.status === "success") {
+        setServerStatus({
+          checked: true,
+          online: true,
+          loading: false,
+          message: "Backend & Database Online (port 8001)"
+        });
+        // Clear stale offline connection error once verified online
+        setLoginError((prev) => (prev && (prev.includes("offline") || prev.includes("unreachable")) ? "" : prev));
+      } else {
+        setServerStatus({
+          checked: true,
+          online: false,
+          loading: false,
+          message: res?.message || "Backend server or database is unavailable (port 8001)."
+        });
+      }
+    } catch (err) {
+      setServerStatus({
+        checked: true,
+        online: false,
+        loading: false,
+        message: err.message || "Backend server is offline (port 8001)."
+      });
+    }
+  }, []);
+
+  // Check backend server status on mount when not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      verifyServerHealth();
+    }
+  }, [isAuthenticated, verifyServerHealth]);
 
   // Dashboard Data State
   const [activeTab, setActiveTab] = useState("orders"); // 'orders' | 'products'
@@ -179,7 +226,15 @@ export default function AdminPage({
         setLoginError(res?.message || "Invalid credentials.");
       }
     } catch (err) {
-      setLoginError(err.message || "Authentication failed. Check your credentials.");
+      const msg = err.message || "Authentication failed. Check your credentials.";
+      setLoginError(msg);
+      if (msg.includes("offline") || msg.includes("unreachable") || msg.includes("connect")) {
+        setServerStatus((prev) => ({
+          ...prev,
+          online: false,
+          message: "Backend server is offline (port 8001)"
+        }));
+      }
     } finally {
       setLoginLoading(false);
     }
@@ -364,6 +419,32 @@ export default function AdminPage({
           <div className="login-brand-icon">🛋️</div>
           <h2>Executive Admin Portal</h2>
           <p className="subtitle">FurniShop Database & Order Management</p>
+
+          <div className="login-server-status-wrap">
+            {serverStatus.loading ? (
+              <span className="server-status-pill checking">
+                <span className="status-dot pulse" /> Checking backend connection...
+              </span>
+            ) : serverStatus.online ? (
+              <span className="server-status-pill online">
+                <span className="status-dot green" /> Backend Online (port 8001) &bull; MariaDB Connected
+              </span>
+            ) : (
+              <div className="server-status-offline-box">
+                <span className="server-status-pill offline">
+                  <span className="status-dot red" /> Backend Offline (port 8001)
+                </span>
+                <button
+                  type="button"
+                  className="retry-health-btn"
+                  onClick={verifyServerHealth}
+                  title="Retry backend connection check"
+                >
+                  <FaSync className={serverStatus.loading ? "fa-spin" : ""} /> Retry
+                </button>
+              </div>
+            )}
+          </div>
 
           {loginError && <div className="login-error-alert">{loginError}</div>}
 
@@ -710,9 +791,13 @@ export default function AdminPage({
                             <div key={idx} className="ordered-item-card">
                               {item.product_image ? (
                                 <img
-                                  src={item.product_image}
+                                  src={resolveImageUrl(item.product_image)}
                                   alt={item.product_name}
                                   className="ordered-item-img"
+                                  onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80";
+                                  }}
                                 />
                               ) : (
                                 <div
@@ -787,8 +872,16 @@ export default function AdminPage({
                       <tr key={p.id}>
                         <td>
                           <div className="prod-cell">
-                            {p.image_url ? (
-                              <img src={p.image_url} alt={p.name} className="prod-cell-img" />
+                            {p.image_url || p.image ? (
+                              <img
+                                src={resolveImageUrl(p.image_url || p.image)}
+                                alt={p.name}
+                                className="prod-cell-img"
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.src = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80";
+                                }}
+                              />
                             ) : (
                               <div
                                 className="prod-cell-img"

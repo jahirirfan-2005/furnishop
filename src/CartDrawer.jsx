@@ -1,5 +1,6 @@
 import React from "react";
 import { FaTimes, FaTrash, FaShoppingBag, FaArrowRight, FaTruck } from "react-icons/fa";
+import { resolveImageUrl } from "./api";
 
 const FALLBACK_IMG = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
 
@@ -49,7 +50,7 @@ function CartDrawer({ isOpen, onClose, cartItems, onUpdateQty, onRemoveItem, onP
               {cartItems.map((item) => (
                 <div key={item.id} className="cart-item">
                   <img
-                    src={item.image}
+                    src={resolveImageUrl(item.image)}
                     alt={item.name}
                     className="cart-item-img"
                     onError={(e) => {

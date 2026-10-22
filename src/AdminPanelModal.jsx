@@ -21,7 +21,7 @@ import {
   FaEyeSlash,
   FaStar
 } from "react-icons/fa";
-import { api } from "./api";
+import { api, resolveImageUrl } from "./api";
 import { toast } from "react-toastify";
 
 function AdminPanelModal({ isOpen, onClose, onOpenAddProduct, onEditProduct, onProductDeleted }) {
@@ -420,9 +420,13 @@ function AdminPanelModal({ isOpen, onClose, onOpenAddProduct, onEditProduct, onP
                             ord.items.map((item, idx) => (
                               <div key={idx} className="selected-product-row">
                                 <img
-                                  src={item.product_image || item.image || "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80"}
+                                  src={resolveImageUrl(item.product_image || item.image) || "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80"}
                                   alt={item.product_name}
                                   className="selected-prod-img"
+                                  onError={(e) => {
+                                    e.target.onerror = null;
+                                    e.target.src = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80";
+                                  }}
                                 />
                                 <div className="selected-prod-info">
                                   <span className="prod-title">{item.product_name || `Product #${item.product_id}`}</span>
@@ -482,7 +486,15 @@ function AdminPanelModal({ isOpen, onClose, onOpenAddProduct, onEditProduct, onP
                     {filteredProducts.map((prod) => (
                       <tr key={prod.id} className={prod.status === "inactive" ? "inactive-row" : ""}>
                         <td>
-                          <img src={prod.image} alt={prod.name} className="table-thumb" />
+                          <img
+                            src={resolveImageUrl(prod.image)}
+                            alt={prod.name}
+                            className="table-thumb"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=400&q=80";
+                            }}
+                          />
                         </td>
                         <td>
                           <strong>{prod.name}</strong>

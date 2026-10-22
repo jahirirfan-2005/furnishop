@@ -12,19 +12,33 @@
  * - Standardized JSON envelopes that never leak database internals
  */
 
-// Load backend/.env into the environment when present
-$envFile = dirname(__DIR__) . '/.env';
-if (is_file($envFile)) {
-    foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-        $line = trim($line);
-        if ($line === '' || $line[0] === '#' || !str_contains($line, '=')) continue;
-        [$key, $value] = explode('=', $line, 2);
-        $key = trim($key);
-        $value = trim($value);
-        if ($key !== '' && getenv($key) === false) {
-            putenv("$key=$value");
-            $_ENV[$key] = $value;
+// Load environment variables from possible locations when present
+$candidateEnvFiles = [
+    dirname(__DIR__) . '/.env',
+    dirname(__DIR__, 2) . '/backend/.env',
+    dirname(__DIR__, 2) . '/.env',
+    __DIR__ . '/.env',
+];
+
+foreach ($candidateEnvFiles as $envFile) {
+    if (is_file($envFile)) {
+        foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            $line = trim($line);
+            if ($line === '' || $line[0] === '#' || !str_contains($line, '=')) continue;
+            [$key, $value] = explode('=', $line, 2);
+            $key = trim($key);
+            $value = trim($value);
+            // Strip surrounding quotes if present
+            if ((str_starts_with($value, '"') && str_ends_with($value, '"')) ||
+                (str_starts_with($value, "'") && str_ends_with($value, "'"))) {
+                $value = substr($value, 1, -1);
+            }
+            if ($key !== '' && getenv($key) === false) {
+                putenv("$key=$value");
+                $_ENV[$key] = $value;
+            }
         }
+        break;
     }
 }
 
@@ -302,6 +316,33 @@ function record_login_attempt(PDO $pdo, string $ip, string $username, bool $succ
 | Product Formatting Helpers
 |--------------------------------------------------------------------------
 */
+function furni_resolve_image_url(?string $url): string
+{
+    if (!$url) return '';
+    $clean = trim($url);
+    if ($clean === '') return '';
+    if (preg_match('#^https?://#i', $clean) || str_starts_with($clean, 'data:')) {
+        return $clean;
+    }
+
+    $mediaBase = getenv('MEDIA_BASE_URL') ?: getenv('APP_URL') ?: '';
+    if (!$mediaBase) {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        if ($host) {
+            $mediaBase = "{$scheme}://{$host}";
+        }
+    }
+
+    $mediaBase = rtrim($mediaBase, '/');
+    $cleanPath = '/' . ltrim($clean, '/');
+    if (str_starts_with($cleanPath, '/uploads/')) {
+        $cleanPath = '/backend' . $cleanPath;
+    }
+
+    return $mediaBase ? ($mediaBase . $cleanPath) : $cleanPath;
+}
+
 function cast_product(array $p): array
 {
     foreach (['id', 'category_id', 'reviews_count', 'stock_quantity', 'has_offer', 'is_featured', 'is_trending'] as $k) {
@@ -318,13 +359,20 @@ function cast_product(array $p): array
 
     if (array_key_exists('additional_images', $p)) {
         $decoded = json_decode($p['additional_images'] ?? '', true);
-        $p['additional_images_arr'] = is_array($decoded) ? $decoded : [];
+        $rawArr = is_array($decoded) ? $decoded : [];
+        $p['additional_images_arr'] = array_values(array_filter(array_map('furni_resolve_image_url', $rawArr)));
     }
 
     $p['brand'] = $p['brand'] ?? 'FurniCraft';
     $p['sku'] = $p['sku'] ?? ('FURNI-' . ($p['id'] ?? ''));
-    if (!isset($p['image_url']) && isset($p['image'])) {
+
+    // Resolve images
+    if (isset($p['image'])) {
+        $p['image'] = furni_resolve_image_url($p['image']);
         $p['image_url'] = $p['image'];
+    }
+    if (isset($p['back_image'])) {
+        $p['back_image'] = furni_resolve_image_url($p['back_image']) ?: ($p['image'] ?? '');
     }
 
     return $p;

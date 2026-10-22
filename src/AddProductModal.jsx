@@ -20,6 +20,7 @@ import {
   FaExclamationCircle
 } from "react-icons/fa";
 import { api, resolveImageUrl } from "./api";
+import { toast } from "react-toastify";
 
 const EMPTY_FORM = {
   name: "",
@@ -102,21 +103,51 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
     setFormData((prev) => ({ ...prev, sku: newSku }));
   };
 
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+
+  const validateImageFile = (file) => {
+    if (!file) return "No file selected.";
+    if (file.size > MAX_FILE_SIZE) {
+      return `Image "${file.name}" exceeds the 5 MB limit (${(file.size / (1024 * 1024)).toFixed(1)} MB). Please select an image under 5 MB.`;
+    }
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (!["jpg", "jpeg", "png", "webp"].includes(ext)) {
+      return `Invalid format for "${file.name}". Only JPG, JPEG, PNG, and WebP images are supported.`;
+    }
+    return null;
+  };
+
   /** Upload the main image and store the returned URL. */
   const handleMainImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const valErr = validateImageFile(file);
+    if (valErr) {
+      setErrorMsg(valErr);
+      toast.error(valErr);
+      e.target.value = "";
+      return;
+    }
+
     setErrorMsg("");
     setUploading(true);
     try {
       const res = await api.uploadImage(file);
-      if (res.status === "success") {
-        setFormData((prev) => ({ ...prev, image: res.data.urls[0] }));
+      if (res.status === "success" && res.data?.urls?.[0]) {
+        const newUrl = res.data.urls[0];
+        setFormData((prev) => ({ ...prev, image: newUrl }));
+        const providerName = res.data.storage_provider ? ` (${res.data.storage_provider})` : "";
+        toast.success(`Image uploaded successfully${providerName}!`);
       } else {
-        setErrorMsg(res.message || "Upload failed");
+        const msg = res.message || "Upload failed";
+        setErrorMsg(msg);
+        toast.error(msg);
       }
     } catch (err) {
-      setErrorMsg(err.message);
+      const msg = err.message || "Upload failed. Please check network and server.";
+      setErrorMsg(msg);
+      toast.error(msg);
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -127,20 +158,36 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
   const handleAdditionalUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
+
+    for (const f of files) {
+      const valErr = validateImageFile(f);
+      if (valErr) {
+        setErrorMsg(valErr);
+        toast.error(valErr);
+        e.target.value = "";
+        return;
+      }
+    }
+
     setErrorMsg("");
     setUploading(true);
     try {
       const res = await api.uploadImage(files);
-      if (res.status === "success") {
+      if (res.status === "success" && res.data?.urls) {
         setFormData((prev) => ({
           ...prev,
           additional_images: [...prev.additional_images, ...res.data.urls].slice(0, 10)
         }));
+        toast.success(`${res.data.urls.length} additional image(s) uploaded successfully!`);
       } else {
-        setErrorMsg(res.message || "Upload failed");
+        const msg = res.message || "Upload failed";
+        setErrorMsg(msg);
+        toast.error(msg);
       }
     } catch (err) {
-      setErrorMsg(err.message);
+      const msg = err.message || "Upload failed";
+      setErrorMsg(msg);
+      toast.error(msg);
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -546,7 +593,14 @@ function AddProductModal({ isOpen, onClose, categories = [], collections = [], e
               <label>Main Product Image *</label>
               <div className="image-upload-row">
                 <div className="image-preview-box" onClick={() => mainFileRef.current?.click()} title="Click to upload image">
-                  <img src={previewImage} alt="Main product preview" />
+                  <img
+                    src={previewImage}
+                    alt="Main product preview"
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect fill='%23eee' width='80' height='80'/%3E%3Ctext x='40' y='46' text-anchor='middle' fill='%23999' font-size='12'%3ENo image%3C/text%3E%3C/svg%3E";
+                    }}
+                  />
                 </div>
                 <div className="image-upload-controls">
                   <button type="button" className="btn-secondary upload-btn" onClick={() => mainFileRef.current?.click()} disabled={uploading}>

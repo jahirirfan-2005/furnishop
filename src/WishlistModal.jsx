@@ -1,5 +1,8 @@
 import React from "react";
 import { FaTimes, FaHeart, FaTrash, FaShoppingCart } from "react-icons/fa";
+import { resolveImageUrl } from "./api";
+
+const FALLBACK_IMG = "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=800&q=80";
 
 function WishlistModal({ isOpen, onClose, wishlistItems, onToggleWishlist, onAddToCart }) {
   if (!isOpen) return null;
@@ -22,7 +25,14 @@ function WishlistModal({ isOpen, onClose, wishlistItems, onToggleWishlist, onAdd
             <div className="wishlist-grid">
               {wishlistItems.map((item) => (
                 <div key={item.id} className="wishlist-card">
-                  <img src={item.image} alt={item.name} />
+                  <img
+                    src={resolveImageUrl(item.image)}
+                    alt={item.name}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = FALLBACK_IMG;
+                    }}
+                  />
                   <div className="wishlist-card-details">
                     <h4>{item.name}</h4>
                     <p className="price">₹{Number(item.price).toLocaleString()}</p>
