@@ -11,6 +11,21 @@ const API_BASE =
   `${window.location.origin}/backend/api`;
 const API_ORIGIN = new URL(API_BASE, window.location.origin).origin;
 
+// Detect if running on a static host (Vercel, Netlify, etc.) vs. local dev
+const IS_STATIC_HOST = typeof window !== "undefined" &&
+  !window.location.hostname.match(/^(localhost|127\.0\.0\.1)$/);
+
+// User-friendly backend connection message depending on deployment context
+export const getBackendLabel = () =>
+  IS_STATIC_HOST
+    ? "Backend API not connected"
+    : "Backend Offline (port 8001)";
+
+export const getBackendHint = () =>
+  IS_STATIC_HOST
+    ? "This site is hosted on a static platform. Connect a PHP backend host (InfinityFree, Railway, or similar) to enable admin features."
+    : "Please ensure MariaDB and the PHP server are running on port 8001.";
+
 // Static snapshot of the MySQL catalog, exported by backend/export_fallback.php.
 // Used ONLY when the PHP API is unreachable (e.g. the static Vercel deployment)
 // so visitors always see products and images. MySQL stays the source of truth.
@@ -193,7 +208,9 @@ const handleResponse = async (res, fallbackMessage) => {
 
     if (!errMessage) {
       if (res.status === 502 || res.status === 504 || res.status === 503) {
-        errMessage = "Backend server is offline or unreachable (port 8001). Please ensure MariaDB and the PHP server are running.";
+        errMessage = IS_STATIC_HOST
+          ? "Backend API is not connected. A PHP hosting service is required for admin features."
+          : "Backend server is offline or unreachable (port 8001). Please ensure MariaDB and the PHP server are running.";
       } else if (res.status === 401) {
         errMessage = fallbackMessage || "Invalid username or password.";
       } else {
@@ -596,7 +613,9 @@ export const api = {
       return {
         status: "error",
         success: false,
-        message: err.message || "Backend server is offline or unreachable (port 8001)."
+        message: err.message || (IS_STATIC_HOST
+          ? "Backend API is not connected. Connect a PHP host to enable this feature."
+          : "Backend server is offline or unreachable (port 8001).")
       };
     }
   },
@@ -638,7 +657,11 @@ export const api = {
       return data;
     } catch (err) {
       if (err.name === "TypeError" && (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed"))) {
-        throw new Error("Unable to connect to backend server. Please make sure the PHP backend server (port 8001) is running.");
+        throw new Error(
+          IS_STATIC_HOST
+            ? "Unable to connect to backend API. This site needs a PHP backend host (InfinityFree, Railway, etc.) for admin login."
+            : "Unable to connect to backend server. Please make sure the PHP backend server (port 8001) is running."
+        );
       }
       throw err;
     }

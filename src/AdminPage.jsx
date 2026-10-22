@@ -24,7 +24,7 @@ import {
   FaLock,
   FaTimes
 } from "react-icons/fa";
-import { api, resolveImageUrl } from "./api";
+import { api, resolveImageUrl, getBackendLabel, getBackendHint } from "./api";
 import { toast } from "react-toastify";
 import "./AdminPage.css";
 
@@ -73,7 +73,7 @@ export default function AdminPage({
           checked: true,
           online: true,
           loading: false,
-          message: "Backend & Database Online (port 8001)"
+          message: "Backend & Database Online"
         });
         // Clear stale offline connection error once verified online
         setLoginError((prev) => (prev && (prev.includes("offline") || prev.includes("unreachable")) ? "" : prev));
@@ -82,7 +82,7 @@ export default function AdminPage({
           checked: true,
           online: false,
           loading: false,
-          message: res?.message || "Backend server or database is unavailable (port 8001)."
+          message: res?.message || getBackendHint()
         });
       }
     } catch (err) {
@@ -90,7 +90,7 @@ export default function AdminPage({
         checked: true,
         online: false,
         loading: false,
-        message: err.message || "Backend server is offline (port 8001)."
+        message: err.message || getBackendHint()
       });
     }
   }, []);
@@ -232,7 +232,7 @@ export default function AdminPage({
         setServerStatus((prev) => ({
           ...prev,
           online: false,
-          message: "Backend server is offline (port 8001)"
+          message: getBackendLabel()
         }));
       }
     } finally {
@@ -427,12 +427,12 @@ export default function AdminPage({
               </span>
             ) : serverStatus.online ? (
               <span className="server-status-pill online">
-                <span className="status-dot green" /> Backend Online (port 8001) &bull; MariaDB Connected
+                <span className="status-dot green" /> Backend Online &bull; MariaDB Connected
               </span>
             ) : (
               <div className="server-status-offline-box">
                 <span className="server-status-pill offline">
-                  <span className="status-dot red" /> Backend Offline (port 8001)
+                  <span className="status-dot red" /> {getBackendLabel()}
                 </span>
                 <button
                   type="button"
