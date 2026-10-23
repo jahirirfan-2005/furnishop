@@ -31,3 +31,4 @@ php-server*.log
 dbdata/
 backend/uploads/products/*
 !backend/uploads/products/.gitkeep
+!backend/uploads/products/.htaccess

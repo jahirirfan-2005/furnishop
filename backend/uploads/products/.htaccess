@@ -1,0 +1,19 @@
+# FurniShop Uploads Security Configuration
+# Disables PHP script execution in this static assets directory
+
+<FilesMatch "\.(php|phtml|phar|pl|py|jsp|asp|sh|cgi|bat|cmd)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+Options -ExecCGI -Indexes

@@ -63,9 +63,11 @@ php backend/export_fallback.php   # regenerates src/products_fallback.json
 
 MySQL stays the single source of truth; the snapshot is only a fallback.
 For a **fully live** deployed store (admin edits, real orders), host the
-`backend/` folder on any PHP+MySQL host and set `VITE_API_BASE_URL` to that
-host's API URL before building.
-   (default `http://127.0.0.1:8001/backend/api`). Change it once for deployment.
+`backend/` folder on any PHP+MySQL host (Railway, Render, or InfinityFree/cPanel):
+- Set `VITE_API_BASE_URL` in Vercel to `https://<backend-host>/backend/api`.
+- The database export is pre-built at `backend/furnishop_production_dump.sql` (contains all 30 products & admin accounts).
+- Production container manifest is provided at `backend/Dockerfile`.
+- `backend/api/config.php` automatically supports cloud database variables (`MYSQLHOST`, `MYSQL_URL`, `DATABASE_URL`) and auto-seeds the database on first boot.
 
 ## API overview
 
