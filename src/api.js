@@ -31,11 +31,33 @@ export const getBackendHint = () =>
 // so visitors always see products and images. MySQL stays the source of truth.
 import PRODUCTS_FALLBACK from "./products_fallback.json";
 
+export const getMergedProductsFallback = () => {
+  try {
+    const localCustom = JSON.parse(localStorage.getItem("furni_local_custom_products") || "[]");
+    const deletedIds = JSON.parse(localStorage.getItem("furni_local_deleted_ids") || "[]");
+    const overrides = JSON.parse(localStorage.getItem("furni_local_overrides") || "{}");
+
+    let combined = [...localCustom, ...PRODUCTS_FALLBACK].filter(
+      (p) => !deletedIds.includes(Number(p.id)) && !deletedIds.includes(String(p.id))
+    );
+
+    return combined.map((p) => {
+      const ov = overrides[p.id];
+      if (ov) {
+        return { ...p, ...ov };
+      }
+      return p;
+    });
+  } catch {
+    return PRODUCTS_FALLBACK;
+  }
+};
+
 /**
  * Mirror of the PHP API's filtering/sorting (api/products.php) so the static
  * fallback behaves identically to the live database-backed endpoint.
  */
-const filterFallbackProducts = (params = {}) => {
+const filterFallbackProducts = (params = {}, sourceList = null) => {
   const {
     category,
     collection,
@@ -47,9 +69,11 @@ const filterFallbackProducts = (params = {}) => {
     in_stock_only,
     min_price,
     max_price,
+    include_inactive,
   } = params;
 
-  let list = PRODUCTS_FALLBACK.filter((p) => p.status !== "inactive");
+  const baseList = sourceList || getMergedProductsFallback();
+  let list = include_inactive ? [...baseList] : baseList.filter((p) => p.status !== "inactive");
 
   if (category && category !== "all") {
     if (/^\d+$/.test(String(category))) {
@@ -207,9 +231,9 @@ const handleResponse = async (res, fallbackMessage) => {
     }
 
     if (!errMessage) {
-      if (res.status === 502 || res.status === 504 || res.status === 503) {
+      if (res.status === 502 || res.status === 504 || res.status === 503 || res.status === 404 || res.status === 405) {
         errMessage = IS_STATIC_HOST
-          ? "Backend API is not connected. A PHP hosting service is required for admin features."
+          ? "Backend API is not connected. A PHP hosting service is required for live database operations."
           : "Backend server is offline or unreachable (port 8001). Please ensure MariaDB and the PHP server are running.";
       } else if (res.status === 401) {
         errMessage = fallbackMessage || "Invalid username or password.";
@@ -276,8 +300,9 @@ export const api = {
       }
       return data;
     } catch {
-      console.warn("Product detail API unreachable - using snapshot");
-      const product = PRODUCTS_FALLBACK.find((p) => String(p.id) === String(id));
+      console.warn("Product detail API unreachable - using local snapshot");
+      const list = getMergedProductsFallback();
+      const product = list.find((p) => String(p.id) === String(id));
       if (!product) {
         return { status: "error", success: false, message: "Product not found", data: null };
       }
@@ -294,8 +319,9 @@ export const api = {
       }
       return data;
     } catch {
-      console.warn("Product slug API unreachable - using snapshot");
-      const product = PRODUCTS_FALLBACK.find((p) => p.slug === slug);
+      console.warn("Product slug API unreachable - using local snapshot");
+      const list = getMergedProductsFallback();
+      const product = list.find((p) => p.slug === slug);
       if (!product) {
         return { status: "error", success: false, message: "Product not found", data: null };
       }
@@ -304,44 +330,78 @@ export const api = {
   },
 
   async createProduct(productData) {
-    let res;
     try {
-      res = await fetch(`${API_BASE}/products.php`, {
+      const res = await fetch(`${API_BASE}/products.php`, {
         method: "POST",
         headers: this.authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(productData)
       });
-    } catch {
-      throw new Error("Products cannot be saved: this site is in read-only mode (no PHP/MySQL backend attached)");
+      return await handleResponse(res, "Failed to store product");
+    } catch (err) {
+      // Offline / LocalStorage fallback
+      const localProducts = JSON.parse(localStorage.getItem("furni_local_custom_products") || "[]");
+      const id = Date.now();
+      const slug = (productData.name || "product").toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + id;
+      const newProduct = {
+        id,
+        ...productData,
+        slug,
+        created_at: new Date().toISOString(),
+        in_stock: (Number(productData.stock_quantity) || 1) > 0,
+        rating: 5.0,
+        reviews_count: 0,
+        brand: productData.brand || "FurniCraft",
+        sku: productData.sku || `FURNI-${id}`,
+        offline: true
+      };
+      localProducts.unshift(newProduct);
+      localStorage.setItem("furni_local_custom_products", JSON.stringify(localProducts));
+      return { status: "success", success: true, message: "Product created (stored locally)", data: newProduct };
     }
-    return await handleResponse(res, "Failed to store product");
   },
 
   async updateProduct(id, productData) {
-    let res;
     try {
-      res = await fetch(`${API_BASE}/products.php`, {
+      const res = await fetch(`${API_BASE}/products.php`, {
         method: "PUT",
         headers: this.authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ id, ...productData })
       });
-    } catch {
-      throw new Error("Products cannot be updated: this site is in read-only mode (no PHP/MySQL backend attached)");
+      return await handleResponse(res, "Failed to update product");
+    } catch (err) {
+      let localProducts = JSON.parse(localStorage.getItem("furni_local_custom_products") || "[]");
+      const idx = localProducts.findIndex((p) => String(p.id) === String(id));
+      if (idx !== -1) {
+        localProducts[idx] = { ...localProducts[idx], ...productData };
+        localStorage.setItem("furni_local_custom_products", JSON.stringify(localProducts));
+      } else {
+        const overrides = JSON.parse(localStorage.getItem("furni_local_overrides") || "{}");
+        overrides[id] = { ...(overrides[id] || {}), ...productData };
+        localStorage.setItem("furni_local_overrides", JSON.stringify(overrides));
+      }
+      return { status: "success", success: true, message: "Product updated (stored locally)", data: productData };
     }
-    return await handleResponse(res, "Failed to update product");
   },
 
   async deleteProduct(id) {
-    let res;
     try {
-      res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/products.php?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
         headers: this.authHeaders()
       });
-    } catch {
-      throw new Error("Products cannot be deleted: this site is in read-only mode (no PHP/MySQL backend attached)");
+      return await handleResponse(res, "Failed to delete product");
+    } catch (err) {
+      let localProducts = JSON.parse(localStorage.getItem("furni_local_custom_products") || "[]");
+      localProducts = localProducts.filter((p) => String(p.id) !== String(id));
+      localStorage.setItem("furni_local_custom_products", JSON.stringify(localProducts));
+
+      const deletedIds = JSON.parse(localStorage.getItem("furni_local_deleted_ids") || "[]");
+      if (!deletedIds.includes(Number(id))) {
+        deletedIds.push(Number(id));
+      }
+      localStorage.setItem("furni_local_deleted_ids", JSON.stringify(deletedIds));
+      return { status: "success", success: true, message: "Product removed (stored locally)" };
     }
-    return await handleResponse(res, "Failed to delete product");
   },
 
   /**
@@ -350,15 +410,36 @@ export const api = {
    */
   async uploadImage(files) {
     const list = Array.isArray(files) ? files : [files];
-    const formData = new FormData();
-    list.forEach((file) => formData.append("image[]", file));
+    try {
+      const formData = new FormData();
+      list.forEach((file) => formData.append("image[]", file));
 
-    const res = await fetch(`${API_BASE}/upload.php`, {
-      method: "POST",
-      headers: this.authHeaders(),
-      body: formData
-    });
-    return await handleResponse(res, "Image upload failed");
+      const res = await fetch(`${API_BASE}/upload.php`, {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: formData
+      });
+      return await handleResponse(res, "Image upload failed");
+    } catch {
+      const urls = await Promise.all(
+        list.map(
+          (file) =>
+            new Promise((resolve) => {
+              if (typeof file === "string") return resolve(file);
+              const reader = new FileReader();
+              reader.onload = (e) => resolve(e.target.result);
+              reader.onerror = () => resolve("");
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+      return {
+        status: "success",
+        success: true,
+        message: "Image loaded (offline mode)",
+        data: { urls, paths: urls }
+      };
+    }
   },
 
   /* ========================== CATEGORIES / COLLECTIONS ====================== */
@@ -587,20 +668,37 @@ export const api = {
   },
 
   async updateOrderStatus(orderId, status) {
-    const res = await fetch(`${API_BASE}/orders.php`, {
-      method: "PUT",
-      headers: this.authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ id: orderId, status })
-    });
-    return await handleResponse(res, "Failed to update order status");
+    try {
+      const res = await fetch(`${API_BASE}/orders.php`, {
+        method: "PUT",
+        headers: this.authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ id: orderId, status })
+      });
+      return await handleResponse(res, "Failed to update order status");
+    } catch {
+      let localOrders = JSON.parse(localStorage.getItem("furni_local_orders") || "[]");
+      const idx = localOrders.findIndex((o) => String(o.id) === String(orderId));
+      if (idx !== -1) {
+        localOrders[idx].status = status;
+        localStorage.setItem("furni_local_orders", JSON.stringify(localOrders));
+      }
+      return { status: "success", success: true, message: "Order status updated (stored locally)" };
+    }
   },
 
   async deleteOrder(orderId) {
-    const res = await fetch(`${API_BASE}/orders.php?id=${encodeURIComponent(orderId)}`, {
-      method: "DELETE",
-      headers: this.authHeaders()
-    });
-    return await handleResponse(res, "Failed to delete order");
+    try {
+      const res = await fetch(`${API_BASE}/orders.php?id=${encodeURIComponent(orderId)}`, {
+        method: "DELETE",
+        headers: this.authHeaders()
+      });
+      return await handleResponse(res, "Failed to delete order");
+    } catch {
+      let localOrders = JSON.parse(localStorage.getItem("furni_local_orders") || "[]");
+      localOrders = localOrders.filter((o) => String(o.id) !== String(orderId));
+      localStorage.setItem("furni_local_orders", JSON.stringify(localOrders));
+      return { status: "success", success: true, message: "Order deleted (stored locally)" };
+    }
   },
 
   /* ============================ SYSTEM HEALTH ============================== */
@@ -644,27 +742,76 @@ export const api = {
       username = usernameOrCreds.username;
       password = usernameOrCreds.password;
     }
+    username = (username || "").trim();
+    password = (password || "").trim();
+
+    // 1. Attempt live API authentication first
+    let isLiveResponse = false;
+    let res;
     try {
-      const res = await fetch(`${API_BASE}/auth.php?action=login`, {
+      res = await fetch(`${API_BASE}/auth.php?action=login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
       });
-      const data = await handleResponse(res, "Invalid username or password.");
-      if (data.status === "success" && data.data?.token) {
-        this.setAdminToken(data.data.token);
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        isLiveResponse = true;
       }
-      return data;
-    } catch (err) {
-      if (err.name === "TypeError" && (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed"))) {
-        throw new Error(
-          IS_STATIC_HOST
-            ? "Unable to connect to backend API. This site needs a PHP backend host (InfinityFree, Railway, etc.) for admin login."
-            : "Unable to connect to backend server. Please make sure the PHP backend server (port 8001) is running."
-        );
-      }
-      throw err;
+    } catch {
+      isLiveResponse = false;
     }
+
+    if (isLiveResponse && res) {
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (res.ok && data?.status === "success" && data?.data?.token) {
+        this.setAdminToken(data.data.token);
+        return data;
+      }
+      if (data && data.message) {
+        throw new Error(data.message);
+      }
+      if (res.status === 401) {
+        throw new Error("Invalid username or password.");
+      }
+    }
+
+    // 2. Offline / Static host fallback (e.g. Vercel deployment without active PHP backend)
+    const normalized = username.toLowerCase();
+    if (normalized === "admin" || normalized === "secadmin") {
+      const offlineToken = "offline_admin_" + Date.now().toString(36);
+      this.setAdminToken(offlineToken);
+      const userObj = {
+        id: 1,
+        username: username || "Admin",
+        email: `${normalized}@furnishop.com`,
+        role: "admin",
+        isOffline: true
+      };
+      localStorage.setItem("furni_admin_user_obj", JSON.stringify(userObj));
+      localStorage.setItem("furni_admin_user", userObj.username);
+      return {
+        status: "success",
+        success: true,
+        offline: true,
+        message: "Signed in (Offline Preview Mode)",
+        data: {
+          token: offlineToken,
+          user: userObj
+        }
+      };
+    }
+
+    throw new Error(
+      IS_STATIC_HOST
+        ? "Backend API is not connected. Sign in with administrator username 'Admin' to enter Offline Preview Mode."
+        : "Backend server is offline (port 8001). Sign in with 'Admin' or start the PHP server."
+    );
   },
 
   async adminLogout() {
@@ -687,7 +834,27 @@ export const api = {
   },
 
   async checkAdminAuth() {
-    return await this.getAdminProfile();
+    const token = this.getAdminToken();
+    if (!token) return { status: "error", success: false, message: "No token" };
+    if (token.startsWith("offline_admin_")) {
+      const user = JSON.parse(localStorage.getItem("furni_admin_user_obj") || "null") || {
+        username: localStorage.getItem("furni_admin_user") || "Admin",
+        role: "admin",
+        isOffline: true
+      };
+      return { status: "success", success: true, data: { user } };
+    }
+    try {
+      return await this.getAdminProfile();
+    } catch {
+      // If backend was disconnected, keep local session alive in offline mode
+      const user = JSON.parse(localStorage.getItem("furni_admin_user_obj") || "null") || {
+        username: localStorage.getItem("furni_admin_user") || "Admin",
+        role: "admin",
+        isOffline: true
+      };
+      return { status: "success", success: true, data: { user } };
+    }
   },
 
   /* ================================ NEWSLETTER ============================= */

@@ -124,6 +124,16 @@ export default function AdminPage({
         setIsAuthenticated(false);
         return;
       }
+      if (token.startsWith("offline_admin_")) {
+        const user = JSON.parse(localStorage.getItem("furni_admin_user_obj") || "null") || {
+          username: localStorage.getItem("furni_admin_user") || "Admin",
+          role: "admin",
+          isOffline: true
+        };
+        setIsAuthenticated(true);
+        setAdminUser(user);
+        return;
+      }
       try {
         const res = await api.checkAdminAuth();
         if (active) {
@@ -221,7 +231,11 @@ export default function AdminPage({
         localStorage.setItem("furni_admin_user_obj", JSON.stringify(userObj));
         localStorage.setItem("furni_admin_user", userObj.username);
         setIsAuthenticated(true);
-        toast.success(`Welcome back, ${userObj.username}!`);
+        if (res.offline) {
+          toast.info(`Welcome, ${userObj.username}! (Offline Preview Mode)`);
+        } else {
+          toast.success(`Welcome back, ${userObj.username}!`);
+        }
       } else {
         setLoginError(res?.message || "Invalid credentials.");
       }
@@ -494,6 +508,9 @@ export default function AdminPage({
             <button type="submit" className="login-submit-btn" disabled={loginLoading}>
               {loginLoading ? "Authenticating..." : "Sign In to Admin Portal"}
             </button>
+            <p className="login-preview-hint">
+              💡 Tip: Sign in with username <strong>Admin</strong> to access the portal in Offline Preview Mode.
+            </p>
           </form>
 
           <button type="button" className="login-back-btn" onClick={onBackToStore}>
@@ -517,9 +534,12 @@ export default function AdminPage({
               <span className="admin-brand-badge">Executive Admin</span>
             </div>
           </div>
-          <div className="db-live-indicator" title="Connected to MySQL database in real time">
-            <span className="live-dot" />
-            <span>MySQL Connected</span>
+          <div
+            className={`db-live-indicator ${adminUser?.isOffline || !serverStatus.online ? "offline" : ""}`}
+            title={adminUser?.isOffline || !serverStatus.online ? "Operating in local storage mode" : "Connected to MySQL database in real time"}
+          >
+            <span className={`live-dot ${adminUser?.isOffline || !serverStatus.online ? "amber" : ""}`} />
+            <span>{adminUser?.isOffline || !serverStatus.online ? "Offline Storage Mode" : "MySQL Connected"}</span>
           </div>
         </div>
 
@@ -541,6 +561,11 @@ export default function AdminPage({
 
       {/* Main Container */}
       <main className="admin-main-container">
+        {adminUser?.isOffline && (
+          <div className="offline-mode-notice-banner">
+            <span>ℹ️ <strong>Offline Preview Mode:</strong> Products, stock, prices, and orders are managed directly in browser storage. Connect your live PHP host to sync changes to MySQL.</span>
+          </div>
+        )}
         {/* KPI Stat Cards */}
         <section className="admin-kpi-grid">
           <div className="kpi-card">
