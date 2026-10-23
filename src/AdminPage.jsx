@@ -75,6 +75,7 @@ export default function AdminPage({
           loading: false,
           message: "Backend & Database Online"
         });
+        setAdminUser((prev) => (prev ? { ...prev, isOffline: false } : prev));
         // Clear stale offline connection error once verified online
         setLoginError((prev) => (prev && (prev.includes("offline") || prev.includes("unreachable")) ? "" : prev));
       } else {
@@ -95,12 +96,10 @@ export default function AdminPage({
     }
   }, []);
 
-  // Check backend server status on mount when not authenticated
+  // Check backend server status on mount
   useEffect(() => {
-    if (!isAuthenticated) {
-      verifyServerHealth();
-    }
-  }, [isAuthenticated, verifyServerHealth]);
+    verifyServerHealth();
+  }, [verifyServerHealth]);
 
   // Dashboard Data State
   const [activeTab, setActiveTab] = useState("orders"); // 'orders' | 'products'
@@ -125,10 +124,26 @@ export default function AdminPage({
         return;
       }
       if (token.startsWith("offline_admin_")) {
+        try {
+          const health = await api.checkHealth();
+          if (health?.status === "success") {
+            const liveAuth = await api.checkAdminAuth();
+            if (liveAuth?.status === "success" && liveAuth?.data?.user) {
+              const liveUser = { ...liveAuth.data.user, isOffline: false };
+              setAdminUser(liveUser);
+              localStorage.setItem("furni_admin_user_obj", JSON.stringify(liveUser));
+              localStorage.setItem("furni_admin_user", liveUser.username);
+              setIsAuthenticated(true);
+              return;
+            }
+          }
+        } catch {
+          // Keep offline mode if backend health fails
+        }
         const user = JSON.parse(localStorage.getItem("furni_admin_user_obj") || "null") || {
           username: localStorage.getItem("furni_admin_user") || "Admin",
           role: "admin",
-          isOffline: true
+          isOffline: false
         };
         setIsAuthenticated(true);
         setAdminUser(user);
@@ -535,11 +550,11 @@ export default function AdminPage({
             </div>
           </div>
           <div
-            className={`db-live-indicator ${adminUser?.isOffline || !serverStatus.online ? "offline" : ""}`}
-            title={adminUser?.isOffline || !serverStatus.online ? "Operating in local storage mode" : "Connected to MySQL database in real time"}
+            className={`db-live-indicator ${!serverStatus.online ? "offline" : ""}`}
+            title={!serverStatus.online ? "Operating in local storage mode" : "Connected to MariaDB database in real time"}
           >
-            <span className={`live-dot ${adminUser?.isOffline || !serverStatus.online ? "amber" : ""}`} />
-            <span>{adminUser?.isOffline || !serverStatus.online ? "Offline Storage Mode" : "MySQL Connected"}</span>
+            <span className={`live-dot ${!serverStatus.online ? "amber" : ""}`} />
+            <span>{!serverStatus.online ? "Offline Storage Mode" : "MariaDB Connected"}</span>
           </div>
         </div>
 
@@ -561,7 +576,7 @@ export default function AdminPage({
 
       {/* Main Container */}
       <main className="admin-main-container">
-        {adminUser?.isOffline && (
+        {!serverStatus.online && (
           <div className="offline-mode-notice-banner">
             <span>ℹ️ <strong>Offline Preview Mode:</strong> Products, stock, prices, and orders are managed directly in browser storage. Connect your live PHP host to sync changes to MySQL.</span>
           </div>
