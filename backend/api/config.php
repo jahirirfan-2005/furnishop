@@ -115,11 +115,20 @@ function furni_session_start(): void
 | Database Connection (PDO)
 |--------------------------------------------------------------------------
 */
-$host = getenv('DB_HOST') ?: '127.0.0.1';
-$port = getenv('DB_PORT') ?: '3307';
-$db   = getenv('DB_NAME') ?: 'furnishop';
-$user = getenv('DB_USER') ?: 'root';
-$pass = getenv('DB_PASS') !== false ? getenv('DB_PASS') : '';
+$dbUrl = getenv('DATABASE_URL') ?: getenv('MYSQL_URL');
+if ($dbUrl && preg_match('#^mysql://([^:]+):([^@]+)@([^:]+):(\d+)/(.*)$#', $dbUrl, $m)) {
+    $user = urldecode($m[1]);
+    $pass = urldecode($m[2]);
+    $host = $m[3];
+    $port = $m[4];
+    $db   = explode('?', $m[5])[0];
+} else {
+    $host = getenv('DB_HOST') ?: getenv('MYSQLHOST') ?: '127.0.0.1';
+    $port = getenv('DB_PORT') ?: getenv('MYSQLPORT') ?: '3307';
+    $db   = getenv('DB_NAME') ?: getenv('MYSQLDATABASE') ?: 'furnishop';
+    $user = getenv('DB_USER') ?: getenv('MYSQLUSER') ?: 'root';
+    $pass = getenv('DB_PASS') !== false ? getenv('DB_PASS') : (getenv('MYSQLPASSWORD') !== false ? getenv('MYSQLPASSWORD') : '');
+}
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host=$host;port=$port;dbname=$db;charset=$charset";
@@ -137,8 +146,12 @@ try {
         $rootDsn = "mysql:host=$host;port=$port;charset=$charset";
         $pdoRoot = new PDO($rootDsn, $user, $pass, $options);
         $pdoRoot->exec("CREATE DATABASE IF NOT EXISTS `$db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-        $schema = __DIR__ . '/../schema.sql';
+        $schema = __DIR__ . '/../furnishop_production_dump.sql';
+        if (!is_file($schema)) {
+            $schema = __DIR__ . '/../schema.sql';
+        }
         if (is_file($schema)) {
+            $pdoRoot->exec("USE `$db`");
             $pdoRoot->exec(file_get_contents($schema));
         }
         $pdo = new PDO($dsn, $user, $pass, $options);
@@ -152,6 +165,22 @@ try {
         ]);
         exit();
     }
+}
+
+// Auto-seed table structures and data if newly provisioned production database is empty
+try {
+    $tableCheck = $pdo->query("SHOW TABLES LIKE 'products'")->fetch();
+    if (!$tableCheck) {
+        $dumpPath = __DIR__ . '/../furnishop_production_dump.sql';
+        if (!is_file($dumpPath)) {
+            $dumpPath = __DIR__ . '/../schema.sql';
+        }
+        if (is_file($dumpPath)) {
+            $pdo->exec(file_get_contents($dumpPath));
+        }
+    }
+} catch (Throwable $t) {
+    error_log('[FurniShop API] Table verification note: ' . $t->getMessage());
 }
 
 /*

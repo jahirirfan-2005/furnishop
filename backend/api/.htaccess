@@ -1,0 +1,15 @@
+# FurniShop API Apache Configuration
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # Pass the Authorization header to PHP (required for Bearer token admin auth)
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
+# Disable directory listing
+Options -Indexes
+
+# Security headers (supplemental)
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>
