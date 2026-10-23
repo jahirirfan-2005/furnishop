@@ -1,6 +1,14 @@
 {
   "rewrites": [
     {
+      "source": "/backend/api/health.php",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/backend/api/:match*",
+      "destination": "/api/gateway?route=:match*"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
